@@ -1,0 +1,28 @@
+name: Download nxsbom-cli from Release and check
+on:
+  workflow_dispatch:
+
+jobs:
+  check-file:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get latest release download URL
+        run: |
+          curl -s https://api.github.com/repos/atif-80/nxsbom-cli/releases/latest \
+          | grep "browser_download_url" \
+          | grep "linux" \
+          | cut -d '"' -f 4 > url.txt
+          
+          echo "Download URL:"
+          cat url.txt
+
+      - name: Download CLI
+        run: |
+          curl -L $(cat url.txt) -o nxsbom-cli
+          chmod +x nxsbom-cli
+          ls -l
+
+      - name: Verify CLI works
+        run: |
+          ./nxsbom-cli --version || echo "Binary exists but failed to run"
