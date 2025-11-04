@@ -1,28 +1,44 @@
-name: Download nxsbom-cli from Release and check
+name: Test nxsbom-cli on multiple Linux distros
 on:
   workflow_dispatch:
 
 jobs:
-  check-file:
+  linux-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - debian:latest   # Run via docker container
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get latest release download URL from cli-public
+      - name: Setup container for Debian
+        if: matrix.os != 'ubuntu-latest'
+        uses: addnab/docker-run-action@v3
+        with:
+          image: debian:latest
+          options: -v ${{ github.workspace }}:/workspace
+          run: |
+            apt update && apt install -y curl ca-certificates
+            curl -s https://api.github.com/repos/atif-80/cli-public/releases/latest \
+            | grep "browser_download_url" \
+            | grep "nxsbom-cli" \
+            | cut -d '"' -f 4 > url.txt
+
+            curl -L $(cat url.txt) -o /workspace/nxsbom-cli
+            chmod +x /workspace/nxsbom-cli
+            /workspace/nxsbom-cli -h
+
+      - name: Download and test on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
         run: |
           curl -s https://api.github.com/repos/atif-80/cli-public/releases/latest \
           | grep "browser_download_url" \
           | grep "nxsbom-cli" \
           | cut -d '"' -f 4 > url.txt
 
-          echo "Download URL:"
-          cat url.txt
-
-      - name: Download nxsbom-cli binary
-        run: |
           curl -L $(cat url.txt) -o nxsbom-cli
           chmod +x nxsbom-cli
-          ls -la
-
-      - name: Test nxsbom-cli help
-        run: |
           ./nxsbom-cli -h
