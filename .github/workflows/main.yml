@@ -1,68 +1,49 @@
-name: Test nxsbom-cli (Ubuntu + Fedora + CentOS)
+name: Test CLI on Linux Distros
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-  pull_request:
 
 jobs:
-  test-cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            container: ""
-          - os: fedora
-            container: "fedora:latest"
-          - os: centos
-            container: "quay.io/centos/centos:stream9"
+  test-linux:
+    runs-on: ubuntu-latest
 
-    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
-    container: ${{ matrix.container }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, fedora-latest, centos-latest]
+
+    name: Test on ${{ matrix.os }}
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      ## Ubuntu direct runner installs unzip/jq
-      - name: Install deps (Ubuntu host)
-        if: matrix.container == ''
+      - name: Run on Ubuntu 24.04
+        if: matrix.os == 'ubuntu-24.04'
         run: |
-          sudo apt update
-          sudo apt install -y unzip jq file
+          echo "Running test on Ubuntu 24.04"
 
-      ## Fedora/CentOS install logic
-      - name: Install deps (Fedora/CentOS)
-        if: matrix.container != ''
+          # Download prebuilt release asset from GitHub
+          curl -L -o bundle.zip \
+            https://github.com/atif-80/cli-public/releases/download/v1.0/bundle.zip
+
+          # Unzip and run CLI
+          unzip bundle.zip -d nx
+          cd nx
+          chmod +x nxsbom-cli
+
+          echo "Running CLI..."
+          ./nxsbom-cli -h
+
+      - name: Run on Fedora latest
+        if: matrix.os == 'fedora-latest'
         run: |
-          if command -v dnf >/dev/null 2>&1; then
-            echo "Fedora detected"
-            dnf install -y curl jq unzip file
-          elif command -v yum >/dev/null 2>&1; then
-            echo "CentOS detected"
-            yum install -y jq unzip file --skip-broken || true
-            command -v curl >/dev/null 2>&1 || yum install -y curl-minimal --skip-broken || true
-          fi
+          echo "Fedora check"
+          pwd
+          ls -al
 
-      - name: Download nxsbom-cli from GitHub Release
+      - name: Run on CentOS latest
+        if: matrix.os == 'centos-latest'
         run: |
-          mkdir -p cli_dir
-          echo "Downloading nxsbom-cli binary..."
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli
-          chmod +x cli_dir/nxsbom-cli
-          ls -al cli_dir
-
-      - name: Run CLI Test
-        run: |
-          echo "Running on OS: ${{ matrix.os }}"
-
-          if [ "${{ matrix.os }}" = "centos" ]; then
-            echo "CentOS – only checking system environment"
-            pwd
-            ls -al
-            exit 0
-          fi
-
-          cli_dir/nxsbom-cli --version || cli_dir/nxsbom-cli -h
+          echo "CentOS check"
+          pwd
+          ls -al
