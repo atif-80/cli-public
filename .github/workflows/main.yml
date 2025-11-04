@@ -1,90 +1,194 @@
-name: Test nxsbom-cli on Linux
+name: Test nxsbom-cli (Ubuntu + Docker matrix)
 
 on:
+  workflow_dispatch:
   push:
   pull_request:
-  workflow_dispatch:
+
+env:
+  REPO: atif-80/cli-public
 
 jobs:
+  prepare:
+    name: Prepare bundle (download & extract)
+    runs-on: ubuntu-latest
+    outputs:
+      cli-path: ${{ steps.setpath.outputs.cli_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl unzip ca-certificates jq file
+          sudo update-ca-certificates || true
+
+      - name: Find latest release asset URL (zip or contains nxsbom)
+        id: find_asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Querying GitHub Releases for ${REPO}..."
+          API="https://api.github.com/repos/${REPO}/releases/latest"
+          # get first asset browser_download_url that matches zip or nxsbom name
+          ASSET_URL=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" "$API" \
+            | jq -r '.assets[] | select(.name|test("zip|nxsbom|nxsbom-cli";"i")) | .browser_download_url' | head -n1)
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "ERROR: Could not find release asset URL via API. Printing release JSON for debug..."
+            curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" "$API" | sed -n '1,160p'
+            exit 1
+          fi
+          echo "Found asset URL: $ASSET_URL"
+          echo "::set-output name=url::$ASSET_URL"
+
+      - name: Download asset
+        id: download
+        run: |
+          ASSET_URL=${{ steps.find_asset.outputs.url }}
+          echo "Downloading asset from: $ASSET_URL"
+          curl -L -H "Accept: application/octet-stream" -o bundle.zip "$ASSET_URL"
+          ls -lh bundle.zip
+          file bundle.zip || true
+
+      - name: Extract bundle and find binary
+        id: setpath
+        run: |
+          mkdir -p cli_dir
+          # try unzip first
+          if unzip -o bundle.zip -d cli_dir >/dev/null 2>&1; then
+            echo "Unzipped bundle into cli_dir/"
+          else
+            echo "unzip failed; try tar"
+            if tar -xf bundle.zip -C cli_dir >/dev/null 2>&1; then
+              echo "Tar extracted into cli_dir/"
+            else
+              echo "❌ Extraction failed; showing first 200 bytes of bundle.zip for debugging"
+              head -c 200 bundle.zip | sed -n '1,120p'
+              exit 1
+            fi
+          fi
+
+          # find binary named nxsbom-cli or nxsbom*
+          CLI_PATH=$(find cli_dir -type f -name "nxsbom-cli" -o -name "nxsbom*" | head -n 1 || true)
+          if [ -z "$CLI_PATH" ]; then
+            echo "❌ No nxsbom binary found in bundle. Listing cli_dir:"
+            ls -R cli_dir || true
+            exit 1
+          fi
+
+          # make it executable
+          chmod +x "$CLI_PATH" || true
+          echo "Found CLI at: $CLI_PATH"
+          echo "::set-output name=cli_path::$CLI_PATH"
+
   ubuntu-latest:
-    name: Test on ubuntu:latest
+    name: Test on ubuntu:latest (runner)
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (for context)
+        uses: actions/checkout@v4
+
+      - name: Copy extracted CLI into workspace
+        run: |
+          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
+          echo "CLI_PATH from prepare: $CLI_PATH"
+          cp -v "$CLI_PATH" ./nxsbom-cli || true
+          ls -l nxsbom-cli || true
 
       - name: Install deps
         run: |
-          sudo apt update
-          sudo apt install -y curl unzip file
+          sudo apt-get update -y
+          sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates || true
 
-      - name: Download CLI
+      - name: Install CLI to /usr/local/bin and run -h
         run: |
-          echo "Downloading bundle.zip ..."
-          curl -H "Authorization: Bearer ${{ secrets.NXSBOM_ACCESS_TOKEN }}" \
-                -L "https://api.nxsbom.dev/cli/download" \
-                -o bundle.zip
+          sudo chmod +x ./nxsbom-cli || true
+          sudo mv -f ./nxsbom-cli /usr/local/bin/nxsbom-cli
+          echo "=== nxsbom-cli -h output ==="
+          nxsbom-cli -h | tee nxsbom-ubuntu-latest.log
 
-      - name: Extract & Test
-        run: |
-          file bundle.zip
-          unzip bundle.zip -d cli
-          ls -lah cli
-          chmod +x cli/nxsbom || true
-          ./cli/nxsbom --version || echo "CLI run failed"
+      - name: Upload ubuntu logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxsbom-ubuntu-latest-log
+          path: nxsbom-ubuntu-latest.log
 
   ubuntu-24:
-    name: Test on ubuntu:24.04
+    name: Test on ubuntu:24.04 (runner)
+    needs: prepare
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy CLI
+        run: |
+          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
+          cp -v "$CLI_PATH" ./nxsbom-cli || true
+          ls -l nxsbom-cli || true
 
       - name: Install deps
         run: |
-          sudo apt update
-          sudo apt install -y curl unzip file
+          sudo apt-get update -y
+          sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates || true
 
-      - name: Download CLI
+      - name: Install CLI and run -h
         run: |
-          curl -H "Authorization: Bearer ${{ secrets.NXSBOM_ACCESS_TOKEN }}" \
-                -L "https://api.nxsbom.dev/cli/download" \
-                -o bundle.zip
+          sudo chmod +x ./nxsbom-cli || true
+          sudo mv -f ./nxsbom-cli /usr/local/bin/nxsbom-cli
+          echo "=== nxsbom-cli -h output (ubuntu 24.04) ==="
+          nxsbom-cli -h | tee nxsbom-ubuntu-24.log
 
-      - name: Extract & Test
-        run: |
-          file bundle.zip
-          unzip bundle.zip -d cli
-          ls -lah cli
-          chmod +x cli/nxsbom || true
-          ./cli/nxsbom --version || echo "CLI run failed"
+      - name: Upload ubuntu-24 logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxsbom-ubuntu-24-log
+          path: nxsbom-ubuntu-24.log
 
-  docker-linux:
-    name: Test on ${{ matrix.os }}
+  docker-other:
+    name: Test on docker OS (debian, fedora, centos, rockylinux)
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [debian:latest, fedora:latest, rockylinux:9]
+        image: [debian:latest, fedora:latest, centos:7, rockylinux:9]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Run test in Docker
+      - name: Prepare mount folder
         run: |
-          echo "Testing in ${{ matrix.os }}"
-          docker run --rm \
-            -e NXSBOM_ACCESS_TOKEN=${{ secrets.NXSBOM_ACCESS_TOKEN }} \
-            -v $PWD:/mnt/work \
-            ${{ matrix.os }} \
-            /bin/sh -c "
-              cd /mnt/work &&
-              if command -v apt >/dev/null 2>&1; then apt update && apt install -y curl unzip file; fi &&
-              if command -v dnf >/dev/null 2>&1; then dnf install -y curl unzip file; fi &&
-              if command -v microdnf >/dev/null 2>&1; then microdnf install -y curl unzip file; fi &&
-              echo 'Downloading...' &&
-              curl -H 'Authorization: Bearer '$NXSBOM_ACCESS_TOKEN \
-                   -L 'https://api.nxsbom.dev/cli/download' \
-                   -o bundle.zip &&
-              file bundle.zip &&
-              unzip bundle.zip -d cli &&
-              chmod +x cli/nxsbom || true &&
-              ./cli/nxsbom --version || echo 'CLI failed'
-            "
+          mkdir -p docker_mount
+          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
+          cp -v "$CLI_PATH" docker_mount/ || true
+          ls -lah docker_mount
+
+      - name: Run container (simple checks)
+        run: |
+          echo "Running container ${ { matrix.image } }"
+          docker run --rm -v $PWD/docker_mount:/work -w /work ${ { matrix.image } } /bin/sh -c '
+            echo "Container: $(cat /etc/*release 2>/dev/null | head -n2 || echo unknown)"
+            echo "pwd & ls:"
+            pwd
+            ls -la /work || true
+
+            # On debian attempt to run nxsbom-cli -h if present
+            if [ -x /work/nxsbom-cli ] && command -v /work/nxsbom-cli >/dev/null 2>&1; then
+              echo "Attempting to run /work/nxsbom-cli -h"
+              /work/nxsbom-cli -h || echo "nxsbom-cli exited nonzero"
+            else
+              echo "/work/nxsbom-cli not executable or not present; printing file info"
+              file /work/nxsbom-cli || true
+            fi
+          '
+
+      - name: Upload docker logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxsbom-docker-${{ matrix.image }}
+          path: docker_mount
