@@ -11,7 +11,7 @@ jobs:
         run: |
           curl -s https://api.github.com/repos/atif-80/cli-public/releases/latest \
           | grep "browser_download_url" \
-          | grep "linux" \
+          | grep "nxsbom-cli" \
           | cut -d '"' -f 4 > url.txt
 
           echo "Download URL:"
@@ -25,4 +25,4 @@ jobs:
 
       - name: Test binary execution
         run: |
-          ./nxsbom-cli --version || echo "Binary present but failed to execute"
+          ./nxsbom-cli || echo "Binary present but failed to execute"
