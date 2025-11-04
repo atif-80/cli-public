@@ -23,6 +23,6 @@ jobs:
           chmod +x nxsbom-cli
           ls -la
 
-      - name: Test binary execution
+      - name: Test nxsbom-cli help
         run: |
-          ./nxsbom-cli || echo "Binary present but failed to execute"
+          ./nxsbom-cli -h
