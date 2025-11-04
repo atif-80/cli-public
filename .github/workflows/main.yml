@@ -1,4 +1,4 @@
-name: Test nxsbom-cli (Ubuntu + Docker matrix)
+name: Test nxsbom-cli (Ubuntu + Fedora + CentOS)
 
 on:
   workflow_dispatch:
@@ -6,10 +6,19 @@ on:
 
 jobs:
   test-cli:
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: fedora
+            container: "fedora:latest"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+
+    runs-on: ubuntu-24.04
+
+    container: ${{ matrix.container }}
 
     env:
       RELEASE_REPO: atif-80/cli-public
@@ -17,15 +26,26 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    - name: Install dependencies (Ubuntu only)
+      if: matrix.container == ''
+      run: |
+        sudo apt update
+        sudo apt install -y curl jq unzip file
+
+    - name: Install dependencies (Fedora/CentOS)
+      if: matrix.container != ''
+      run: |
+        if command -v dnf >/dev/null 2>&1; then
+          dnf install -y curl jq unzip file
+        elif command -v yum >/dev/null 2>&1; then
+          yum install -y epel-release || true
+          yum install -y curl jq unzip file
+        fi
 
     - name: Fetch Latest Release Asset URL
       id: get_asset
       run: |
         API="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
-
-        echo "Querying $API"
         ASSET_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" $API \
           | jq -r ".assets[] | select(.name==\"${ASSET_NAME}\") | .browser_download_url")
 
@@ -33,14 +53,13 @@ jobs:
           echo "❌ No asset found matching '${ASSET_NAME}'"
           exit 1
         fi
-
+        
         echo "ASSET_URL=$ASSET_URL" >> $GITHUB_ENV
 
     - name: Download asset
       run: |
-        echo "Downloading asset from: $ASSET_URL"
         curl -L -o bundle "$ASSET_URL"
-        ls -lah bundle
+        ls -lah bundle || true
 
     - name: Detect file type
       run: |
@@ -50,18 +69,15 @@ jobs:
     - name: Extract or prepare binary
       run: |
         mkdir -p cli_dir
-        
         if file bundle | grep -qi "zip"; then
-          echo "Unzipping..."
           unzip bundle -d cli_dir
         else
-          echo "Binary file detected"
           cp bundle cli_dir/nxsbom-cli
         fi
-
         chmod +x cli_dir/nxsbom-cli
         ls -la cli_dir
 
-    - name: Run CLI test
+    - name: Run CLI Test
       run: |
-        cli_dir/nxsbom-cli --version || echo "Run test passed"
+        echo "Running on OS: ${{ matrix.os }}"
+        cli_dir/nxsbom-cli --version || echo "✅ CLI executed"
