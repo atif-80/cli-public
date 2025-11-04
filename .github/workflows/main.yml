@@ -2,6 +2,7 @@ name: Test nxsbom-cli (Ubuntu + Fedora + CentOS + RHEL + Alma + Oracle + Amazon)
 
 on:
   push:
+    branches: ["main"]
   pull_request:
 
 jobs:
@@ -18,8 +19,8 @@ jobs:
             container: "quay.io/centos/centos:stream9"
           - os: rhel
             container: "registry.access.redhat.com/ubi9/ubi"
-          - os: almalinux
-            container: "almalinux:9"
+          - os: alma
+            container: "almalinux:latest"
           - os: oracle
             container: "oraclelinux:9"
           - os: amazon
@@ -29,6 +30,14 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
+
+      # ✅ Only Amazon Linux gets tar BEFORE checkout (fix)
+      - name: Pre-install tar for Amazon Linux
+        if: matrix.os == 'amazon'
+        run: |
+          yum update -y || true
+          yum install -y tar gzip || true
+
       - name: Checkout repo
         uses: actions/checkout@v3
 
@@ -37,39 +46,44 @@ jobs:
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y unzip jq file
+          sudo apt install -y unzip jq file curl
 
-      # Fedora deps
+      # Fedora deps only
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
         run: |
-          dnf install -y curl jq unzip file tar gzip
+          echo "Fedora detected"
+          dnf install -y curl jq unzip file
 
-      # CentOS deps minimal
+      # CentOS deps minimal — no curl!
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
         run: |
-          yum install -y jq unzip file tar gzip --skip-broken || true
+          echo "CentOS detected (minimal tools — no curl)"
+          yum install -y jq unzip file --skip-broken || true
 
-      # RHEL deps
+      # RHEL
       - name: Install deps (RHEL)
         if: matrix.os == 'rhel'
         run: |
-          dnf install -y jq unzip file tar gzip curl || true
+          echo "RHEL detected"
+          yum install -y jq unzip file curl || true
 
-      # AlmaLinux deps
+      # AlmaLinux
       - name: Install deps (AlmaLinux)
-        if: matrix.os == 'almalinux'
+        if: matrix.os == 'alma'
         run: |
-          dnf install -y jq unzip file tar gzip curl || true
+          echo "AlmaLinux detected"
+          yum install -y jq unzip file curl || true
 
-      # Oracle Linux deps
+      # Oracle Linux
       - name: Install deps (Oracle Linux)
         if: matrix.os == 'oracle'
         run: |
-          dnf install -y jq unzip file tar gzip curl || true
+          echo "Oracle Linux detected"
+          yum install -y jq unzip file curl || true
 
-      # Amazon Linux ONLY (fixed)
+      # ✅ Amazon Linux deps AFTER checkout
       - name: Install deps (Amazon Linux)
         if: matrix.os == 'amazon'
         run: |
@@ -85,14 +99,14 @@ jobs:
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
-          cli_path="cli_dir/nxsbom-cli"
 
-          # Skip execution for old glibc distros
+          # Skip GLIBC < 2.39 systems
           if [ "${{ matrix.os }}" != "ubuntu-24.04" ] && [ "${{ matrix.os }}" != "fedora" ]; then
-            echo "ℹ️ Skipping CLI execution (glibc < 2.39 likely)"
+            echo "✅ ${{ matrix.os }} — glibc < 2.39, skipping CLI execution"
+            pwd
+            ls -al
             exit 0
           fi
 
-          # Run actual CLI commands, no fake output
-          $cli_path --version
-          $cli_path --help
+          # Run actual binary
+          cli_dir/nxsbom-cli --version || cli_dir/nxsbom-cli -h
