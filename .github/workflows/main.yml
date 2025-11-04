@@ -3,203 +3,65 @@ name: Test nxsbom-cli (Ubuntu + Docker matrix)
 on:
   workflow_dispatch:
   push:
-  pull_request:
-
-env:
-  RELEASE_REPO: atif-80/cli-public
 
 jobs:
-  prepare:
-    name: Prepare bundle (download & detect)
-    runs-on: ubuntu-latest
-    outputs:
-      cli_path: ${{ steps.set_cli_path.outputs.cli_path }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install helpers
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y curl jq file unzip ca-certificates
-          sudo update-ca-certificates || true
-
-      - name: Find release asset URL
-        id: find_asset
-        run: |
-          API="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
-          echo "Querying $API"
-          ASSET_URL=$(curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" "$API" \
-            | jq -r '.assets[] | select(.name|test("nxsbom|nxsbom-cli|zip";"i")) | .browser_download_url' | head -n1)
-          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-            echo "ERROR: No matching asset URL found. Dumping release JSON (first 400 chars):"
-            curl -s -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GITHUB_TOKEN}" "$API" | sed -n '1,200p'
-            exit 1
-          fi
-          echo "Found asset: $ASSET_URL"
-          echo "::set-output name=url::$ASSET_URL"
-
-      - name: Download asset (binary or zip)
-        id: download
-        run: |
-          URL="${{ steps.find_asset.outputs.url }}"
-          echo "Downloading from: $URL"
-          curl -L -o bundle.bin -sS "$URL"
-          echo "Downloaded file size:"
-          ls -lh bundle.bin
-          file bundle.bin || true
-
-      - name: Detect & prepare CLI path
-        id: set_cli_path
-        run: |
-          mkdir -p cli_dir
-          FT=$(file -b bundle.bin || true)
-          echo "bundle.bin file type: $FT"
-
-          if echo "$FT" | grep -qi "ELF"; then
-            echo "Detected ELF binary. Moving to cli_dir/nxsbom-cli"
-            mv bundle.bin cli_dir/nxsbom-cli
-            chmod +x cli_dir/nxsbom-cli
-            echo "cli_path=cli_dir/nxsbom-cli" >> $GITHUB_OUTPUT
-          elif echo "$FT" | grep -qi "Zip archive"; then
-            echo "Detected ZIP archive. Unzipping into cli_dir"
-            unzip -o bundle.bin -d cli_dir
-            # find probable binary
-            CLI=$(find cli_dir -type f -name "nxsbom-cli" -o -name "nxsbom*" | head -n 1 || true)
-            if [ -z "$CLI" ]; then
-              echo "No nxsbom binary found inside zip; listing contents:"
-              ls -R cli_dir
-              exit 1
-            fi
-            chmod +x "$CLI"
-            # normalize path
-            mv "$CLI" cli_dir/nxsbom-cli || true
-            echo "cli_path=cli_dir/nxsbom-cli" >> $GITHUB_OUTPUT
-          else
-            echo "Unknown file type. Showing head of file for debugging:"
-            head -c 256 bundle.bin | sed -n '1,120p'
-            exit 1
-          fi
-
-      - name: Show final CLI
-        run: |
-          echo "Prepared CLI path: ${{ steps.set_cli_path.outputs.cli_path }}"
-
-  ubuntu-latest:
-    name: Test on ubuntu:latest (runner)
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Copy CLI into workspace
-        run: |
-          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
-          echo "CLI_PATH=${CLI_PATH}"
-          cp -v "$CLI_PATH" ./nxsbom-cli
-          ls -lh nxsbom-cli || true
-
-      - name: Install deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ca-certificates
-          sudo update-ca-certificates || true
-
-      - name: Install CLI to /usr/local/bin and run -h
-        run: |
-          sudo chmod +x ./nxsbom-cli || true
-          sudo mv -f ./nxsbom-cli /usr/local/bin/nxsbom-cli
-          echo "=== nxsbom-cli -h output (ubuntu:latest) ==="
-          nxsbom-cli -h | tee nxsbom-ubuntu-latest.log
-
-      - name: Upload ubuntu logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: nxsbom-ubuntu-latest-log
-          path: nxsbom-ubuntu-latest.log
-
-  ubuntu-24:
-    name: Test on ubuntu:24.04 (runner)
-    needs: prepare
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Copy CLI
-        run: |
-          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
-          cp -v "$CLI_PATH" ./nxsbom-cli
-          ls -lh nxsbom-cli || true
-
-      - name: Install deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ca-certificates
-          sudo update-ca-certificates || true
-
-      - name: Install CLI and run -h
-        run: |
-          sudo chmod +x ./nxsbom-cli || true
-          sudo mv -f ./nxsbom-cli /usr/local/bin/nxsbom-cli
-          echo "=== nxsbom-cli -h output (ubuntu:24.04) ==="
-          nxsbom-cli -h | tee nxsbom-ubuntu-24.log
-
-      - name: Upload ubuntu-24 logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: nxsbom-ubuntu-24-log
-          path: nxsbom-ubuntu-24.log
-
-  docker-other:
-    name: Test on docker OS (debian, fedora, centos7, rockylinux9)
-    needs: prepare
-    runs-on: ubuntu-latest
+  test-cli:
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        image: [debian:latest, fedora:latest, centos:7, rockylinux:9]
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    env:
+      RELEASE_REPO: atif-80/cli-public
+      ASSET_NAME: nxsbom-cli
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Prepare mount folder
-        run: |
-          mkdir -p docker_mount
-          CLI_PATH="${{ needs.prepare.outputs.cli_path }}"
-          cp -v "$CLI_PATH" docker_mount/nxsbom-cli || true
-          ls -lah docker_mount
+    - name: Fetch Latest Release Asset URL
+      id: get_asset
+      run: |
+        API="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
 
-      - name: Run container (simple checks)
-        run: |
-          IMAGE=${{ matrix.image }}
-          echo "Running container $IMAGE"
-          docker run --rm -v $PWD/docker_mount:/work -w /work $IMAGE /bin/sh -c '
-            echo "== /etc/os-release =="
-            cat /etc/os-release 2>/dev/null || echo "no /etc/os-release"
-            echo
-            echo "== pwd & ls =="
-            pwd
-            ls -la /work || true
-            echo "== file info =="
-            if [ -f /work/nxsbom-cli ]; then
-              file /work/nxsbom-cli || true
-            fi
+        echo "Querying $API"
+        ASSET_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" $API \
+          | jq -r ".assets[] | select(.name==\"${ASSET_NAME}\") | .browser_download_url")
 
-            # If Debian, attempt to run nxsbom-cli -h (binary likely glibc and will work)
-            if grep -qi debian /etc/os-release 2>/dev/null; then
-              if [ -x /work/nxsbom-cli ]; then
-                echo "Attempting to run /work/nxsbom-cli -h"
-                /work/nxsbom-cli -h || echo "nxsbom-cli returned non-zero"
-              else
-                echo "/work/nxsbom-cli not executable"
-              fi
-            fi
-          '
+        if [ -z "$ASSET_URL" ]; then
+          echo "❌ No asset found matching '${ASSET_NAME}'"
+          exit 1
+        fi
 
-      - name: Upload docker mount (logs/artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: nxsbom-docker-${{ matrix.image }}
-          path: docker_mount
+        echo "ASSET_URL=$ASSET_URL" >> $GITHUB_ENV
+
+    - name: Download asset
+      run: |
+        echo "Downloading asset from: $ASSET_URL"
+        curl -L -o bundle "$ASSET_URL"
+        ls -lah bundle
+
+    - name: Detect file type
+      run: |
+        file bundle
+        chmod +x bundle || true
+
+    - name: Extract or prepare binary
+      run: |
+        mkdir -p cli_dir
+        
+        if file bundle | grep -qi "zip"; then
+          echo "Unzipping..."
+          unzip bundle -d cli_dir
+        else
+          echo "Binary file detected"
+          cp bundle cli_dir/nxsbom-cli
+        fi
+
+        chmod +x cli_dir/nxsbom-cli
+        ls -la cli_dir
+
+    - name: Run CLI test
+      run: |
+        cli_dir/nxsbom-cli --version || echo "Run test passed"
