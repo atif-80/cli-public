@@ -7,22 +7,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get latest release download URL
+      - name: Get latest release download URL from cli-public
         run: |
-          curl -s https://api.github.com/repos/atif-80/nxsbom-cli/releases/latest \
+          curl -s https://api.github.com/repos/atif-80/cli-public/releases/latest \
           | grep "browser_download_url" \
           | grep "linux" \
           | cut -d '"' -f 4 > url.txt
-          
+
           echo "Download URL:"
           cat url.txt
 
-      - name: Download CLI
+      - name: Download nxsbom-cli binary
         run: |
           curl -L $(cat url.txt) -o nxsbom-cli
           chmod +x nxsbom-cli
-          ls -l
+          ls -la
 
-      - name: Verify CLI works
+      - name: Test binary execution
         run: |
-          ./nxsbom-cli --version || echo "Binary exists but failed to run"
+          ./nxsbom-cli --version || echo "Binary present but failed to execute"
