@@ -1,46 +1,71 @@
-name: Test nxsbom-cli on 5 OS (Parallel)
+name: Test nxsbom-cli on Linux Distros
 
 on:
   workflow_dispatch:
+  push:
+  pull_request:
 
 jobs:
-  test:
+  test-linux:
+    runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, ubuntu-24.04, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        distro:
+          - ubuntu:latest
+          - ubuntu:24.04
+          - debian:latest
+          - fedora:latest
+          - centos:latest
+          - rockylinux:latest
 
     steps:
-      - name: Download binary (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          echo "Downloading Linux binary..."
-          curl -L https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli -o nxsbom-cli
-          chmod +x nxsbom-cli
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Download binary (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "Downloading Windows binary..."
-          curl -L https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli.exe -o nxsbom-cli.exe
+    - name: Install unzip & curl
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y unzip curl
 
-      - name: Download binary (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          echo "Downloading macOS binary..."
-          curl -L https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-macos -o nxsbom-cli
-          chmod +x nxsbom-cli
+    - name: Download nxsbom CLI zip bundle
+      env:
+        TOKEN: ${{ secrets.NXSBOM_ACCESS_TOKEN }}
+      run: |
+        echo "Downloading bundle..."
+        curl -L -H "Authorization: token $TOKEN" \
+        -o bundle.zip \
+        https://github.com/atif-80/nxsbom-cli/releases/latest/download/nxsbom-cli.zip
 
-      - name: Run CLI help (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          ./nxsbom-cli -h || echo "⚠️ Expected failure on some Linux distros due to GLIBC"
+        ls -l bundle.zip
 
-      - name: Run CLI help (Windows)
-        if: runner.os == 'Windows'
-        run: .\nxsbom-cli.exe -h
+    - name: Unzip CLI bundle
+      run: |
+        mkdir nx
+        unzip bundle.zip -d nx
+        ls -l nx
 
-      - name: Run CLI help (macOS)
-        if: runner.os == 'macOS'
-        run: ./nxsbom-cli -h
+    - name: Test CLI in ${{ matrix.distro }}
+      run: |
+        echo ">>> Running on ${{ matrix.distro }}"
+        docker run --rm \
+          -v $PWD/nx:/nx \
+          ${{ matrix.distro }} \
+          sh -c "
+            # install unzip & curl depending on distro
+            if command -v apt >/dev/null 2>&1; then
+              apt update && apt install -y unzip curl ca-certificates
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y unzip curl ca-certificates
+            elif command -v yum >/dev/null 2>&1; then
+              yum install -y unzip curl ca-certificates
+            fi
+
+            chmod +x /nx/nxsbom-cli
+
+            mv /nx/nxsbom-cli /usr/local/bin/nxsbom-cli
+
+            echo \"--- Running nxsbom-cli -h ---\"
+            nxsbom-cli -h
+          "
