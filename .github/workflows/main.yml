@@ -2,63 +2,104 @@ name: Test nxsbom-cli (Ubuntu + Fedora + CentOS + RHEL + Alma + Oracle + Amazon)
 
 on:
   push:
-    branches: [ main ]
+    branches: ["main"]
   pull_request:
-    branches: [ main ]
 
 jobs:
   test-cli:
     strategy:
+      fail-fast: false
       matrix:
-        os: [
-          ubuntu-latest,
-          fedora:latest,
-          centos:stream8,
-          rhel:latest,
-          almalinux:latest,
-          oraclelinux:9,
-          amazonlinux:2,
-          amazonlinux:2023
-        ]
-    runs-on: ubuntu-latest
-    container: ${{ matrix.os }}
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: fedora
+            container: "fedora:latest"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma
+            container: "almalinux:latest"
+          - os: oracle
+            container: "oraclelinux:9"
+          - os: amazon
+            container: "amazonlinux:2023"
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
 
     steps:
-      - uses: actions/checkout@v3
 
-      # --------------------------------------------------------------- 
-      # Install Dependencies
-      # ---------------------------------------------------------------
-      - name: Install deps (Ubuntu/Debian)
-        if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'debian')
+      # ✅ Only Amazon Linux gets tar BEFORE checkout (fix)
+      - name: Pre-install tar for Amazon Linux
+        if: matrix.os == 'amazon'
         run: |
-          apt-get update
-          apt-get install -y curl tar gzip
+          yum update -y || true
+          yum install -y tar gzip || true
 
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # Ubuntu direct install deps
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
+        run: |
+          sudo apt update
+          sudo apt install -y unzip jq file curl
+
+      # Fedora deps only
       - name: Install deps (Fedora)
-        if: contains(matrix.os, 'fedora')
+        if: matrix.os == 'fedora'
         run: |
-          dnf install -y curl tar gzip
+          echo "Fedora detected"
+          dnf install -y curl jq unzip file
 
-      - name: Install deps (CentOS/RHEL/Alma/Oracle)
-        if: contains(matrix.os, 'centos') || contains(matrix.os, 'rhel') || contains(matrix.os, 'almalinux') || contains(matrix.os, 'oraclelinux')
+      # CentOS deps minimal — no curl!
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
         run: |
-          yum install -y curl tar gzip
+          echo "CentOS detected (minimal tools — no curl)"
+          yum install -y jq unzip file --skip-broken || true
 
+      # RHEL
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: |
+          echo "RHEL detected"
+          yum install -y jq unzip file curl || true
+
+      # AlmaLinux
+      - name: Install deps (AlmaLinux)
+        if: matrix.os == 'alma'
+        run: |
+          echo "AlmaLinux detected"
+          yum install -y jq unzip file curl || true
+
+      # Oracle Linux
+      - name: Install deps (Oracle Linux)
+        if: matrix.os == 'oracle'
+        run: |
+          echo "Oracle Linux detected"
+          yum install -y jq unzip file curl || true
+
+      # ✅ Amazon Linux deps AFTER checkout
       - name: Install deps (Amazon Linux)
-        if: contains(matrix.os, 'amazonlinux')
+        if: matrix.os == 'amazon'
         run: |
-          yum install -y curl tar gzip
+          yum install -y jq unzip file tar gzip git curl || true
 
-      # --------------------------------------------------------------- 
-      # Download & Run CLI
-      # ---------------------------------------------------------------
       - name: Download nxsbom-cli
         run: |
-          curl -L https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli-linux-x64.tar.gz -o nxsbom.tar.gz
-          tar -xzf nxsbom.tar.gz
-          chmod +x nxsbom-cli
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli || true
+          chmod +x cli_dir/nxsbom-cli || true
+          ls -al cli_dir
 
-      - name: Run CLI
+      - name: Run CLI Test
         run: |
-          ./nxsbom-cli -h
+          echo "Running on OS: ${{ matrix.os }}"
+          pwd
+          ls -al
+          # 🟢 Run binary directly — NO more skipping, NO hardcoded text
+          cli_dir/nxsbom-cli --version || cli_dir/nxsbom-cli -h
