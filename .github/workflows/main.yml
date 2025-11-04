@@ -1,49 +1,62 @@
-name: Test CLI on Linux Distros
-
-on:
-  workflow_dispatch:
-
 jobs:
-  test-linux:
-    runs-on: ubuntu-latest
-
+  test-cli:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-24.04, fedora-latest, centos-latest]
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: fedora
+            container: "fedora:latest"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
 
-    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Run on Ubuntu 24.04
-        if: matrix.os == 'ubuntu-24.04'
+      # Ubuntu direct install deps
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
         run: |
-          echo "Running test on Ubuntu 24.04"
+          sudo apt update
+          sudo apt install -y unzip jq file
 
-          # Download prebuilt release asset from GitHub
-          curl -L -o bundle.zip \
-            https://github.com/atif-80/cli-public/releases/download/v1.0/bundle.zip
-
-          # Unzip and run CLI
-          unzip bundle.zip -d nx
-          cd nx
-          chmod +x nxsbom-cli
-
-          echo "Running CLI..."
-          ./nxsbom-cli -h
-
-      - name: Run on Fedora latest
-        if: matrix.os == 'fedora-latest'
+      # Fedora deps only
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
         run: |
-          echo "Fedora check"
-          pwd
-          ls -al
+          echo "Fedora detected"
+          dnf install -y curl jq unzip file
 
-      - name: Run on CentOS latest
-        if: matrix.os == 'centos-latest'
+      # CentOS deps minimal — no curl!
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
         run: |
-          echo "CentOS check"
-          pwd
-          ls -al
+          echo "CentOS detected (minimal tools — no curl)"
+          yum install -y jq unzip file --skip-broken || true
+
+      - name: Download nxsbom-cli
+        run: |
+          mkdir -p cli_dir
+          echo "Downloading nxsbom-cli"
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli || true
+          chmod +x cli_dir/nxsbom-cli || true
+          ls -al cli_dir
+
+      - name: Run CLI Test
+        run: |
+          echo "Running on OS: ${{ matrix.os }}"
+
+          if [ "${{ matrix.os }}" = "centos" ]; then
+            echo "✅ CentOS – checking environment only"
+            pwd
+            ls -al
+            exit 0
+          fi
+
+          echo "✅ Running nxsbom-cli help/version"
+          cli_dir/nxsbom-cli --version || cli_dir/nxsbom-cli -h
