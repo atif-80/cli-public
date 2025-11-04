@@ -1,3 +1,11 @@
+name: Test nxsbom-cli (Ubuntu + Fedora + CentOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+
 jobs:
   test-cli:
     strategy:
@@ -32,12 +40,11 @@ jobs:
           echo "Fedora detected"
           dnf install -y curl jq unzip file
 
-      # CentOS — install curl & core tools
+      # CentOS deps
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
         run: |
           echo "CentOS detected"
-          # Try dnf first, fallback to yum
           (dnf install -y curl jq unzip file || yum install -y curl jq unzip file) || true
           which curl || echo "⚠️ curl missing"
 
