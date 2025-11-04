@@ -18,26 +18,28 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # Ubuntu direct install deps
+      # Ubuntu deps
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y unzip jq file
+          sudo apt install -y unzip jq file curl
 
-      # Fedora deps only
+      # Fedora deps
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
         run: |
           echo "Fedora detected"
           dnf install -y curl jq unzip file
 
-      # CentOS deps minimal — no curl!
+      # CentOS — install curl & core tools
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
         run: |
-          echo "CentOS detected (minimal tools — no curl)"
-          yum install -y jq unzip file --skip-broken || true
+          echo "CentOS detected"
+          # Try dnf first, fallback to yum
+          (dnf install -y curl jq unzip file || yum install -y curl jq unzip file) || true
+          which curl || echo "⚠️ curl missing"
 
       - name: Download nxsbom-cli
         run: |
@@ -52,9 +54,15 @@ jobs:
           echo "Running on OS: ${{ matrix.os }}"
 
           if [ "${{ matrix.os }}" = "centos" ]; then
-            echo "✅ CentOS – checking environment only"
+            echo "✅ CentOS – verifying environment + CLI presence"
             pwd
-            ls -al
+            ls -al cli_dir
+            if [ -f cli_dir/nxsbom-cli ]; then
+              echo "✅ Binary exists — testing version"
+              cli_dir/nxsbom-cli --version || cli_dir/nxsbom-cli -h || true
+            else
+              echo "⚠️ CLI missing — environment only test"
+            fi
             exit 0
           fi
 
