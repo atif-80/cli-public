@@ -1,32 +1,57 @@
-name: Check CLI Help on OS Matrix
+name: Test nxsbom-cli on 5 OS Sequentially
 
 on:
   workflow_dispatch:
+  push:
 
 jobs:
-  check-cli:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, debian-latest, alpine-latest]
-
+  ubuntu_latest:
+    name: Ubuntu Latest
+    runs-on: ubuntu-latest
     steps:
-      - name: Install dependencies (Debian/Ubuntu)
-        if: runner.os != 'Linux' || matrix.os == 'ubuntu-latest' || matrix.os == 'debian-latest'
-        run: |
-          sudo apt update
-          sudo apt install -y wget
+      - uses: actions/checkout@v4
+      - run: echo "Testing on ubuntu-latest"
+      - run: wget https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli && chmod +x nxsbom-cli
+      - run: ./nxsbom-cli -h
 
-      - name: Install dependencies (Alpine)
-        if: matrix.os == 'alpine-latest'
-        run: |
-          apk update
-          apk add wget
+  ubuntu_2204:
+    name: Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    needs: ubuntu_latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing on ubuntu-22.04"
+      - run: wget https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli && chmod +x nxsbom-cli
+      - run: ./nxsbom-cli -h
 
-      - name: Download nxsbom-cli release
-        run: |
-          wget https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli
-          chmod +x nxsbom-cli
+  ubuntu_2404:
+    name: Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    needs: ubuntu_2204
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing on ubuntu-24.04"
+      - run: wget https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli && chmod +x nxsbom-cli
+      - run: ./nxsbom-cli -h
 
-      - name: Run nxsbom-cli -h
-        run: ./nxsbom-cli -h
+  windows_latest:
+    name: Windows Latest
+    runs-on: windows-latest
+    needs: ubuntu_2404
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download CLI (Windows)
+        run: |
+          curl -L -o nxsbom-cli.exe https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli.exe
+      - name: Run CLI help
+        run: .\nxsbom-cli.exe -h
+
+  macos_latest:
+    name: macOS Latest
+    runs-on: macos-latest
+    needs: windows_latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install wget
+      - run: wget https://github.com/atif-80/cli-public/releases/latest/download/nxsbom-cli && chmod +x nxsbom-cli
+      - run: ./nxsbom-cli -h
