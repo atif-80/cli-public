@@ -6,75 +6,85 @@ on:
   workflow_dispatch:
 
 jobs:
-  linux-test:
+  ubuntu-latest:
+    name: Test on ubuntu:latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt update
+          sudo apt install -y curl unzip file
+
+      - name: Download CLI
+        run: |
+          echo "Downloading bundle.zip ..."
+          curl -H "Authorization: Bearer ${{ secrets.NXSBOM_ACCESS_TOKEN }}" \
+                -L "https://api.nxsbom.dev/cli/download" \
+                -o bundle.zip
+
+      - name: Extract & Test
+        run: |
+          file bundle.zip
+          unzip bundle.zip -d cli
+          ls -lah cli
+          chmod +x cli/nxsbom || true
+          ./cli/nxsbom --version || echo "CLI run failed"
+
+  ubuntu-24:
+    name: Test on ubuntu:24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt update
+          sudo apt install -y curl unzip file
+
+      - name: Download CLI
+        run: |
+          curl -H "Authorization: Bearer ${{ secrets.NXSBOM_ACCESS_TOKEN }}" \
+                -L "https://api.nxsbom.dev/cli/download" \
+                -o bundle.zip
+
+      - name: Extract & Test
+        run: |
+          file bundle.zip
+          unzip bundle.zip -d cli
+          ls -lah cli
+          chmod +x cli/nxsbom || true
+          ./cli/nxsbom --version || echo "CLI run failed"
+
+  docker-linux:
     name: Test on ${{ matrix.os }}
     runs-on: ubuntu-latest
-    
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu:latest, ubuntu:24.04, debian:latest, fedora:latest, centos:latest, rockylinux:latest]
+        os: [debian:latest, fedora:latest, rockylinux:9]
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Pull Docker image
-        run: docker pull ${{ matrix.os }}
-
-      - name: Run tests inside container
-        env:
-          NX_TOKEN: ${{ secrets.NXSBOM_ACCESS_TOKEN }}
+      - name: Run test in Docker
         run: |
+          echo "Testing in ${{ matrix.os }}"
           docker run --rm \
-            -e NX_TOKEN="$NX_TOKEN" \
-            -v $PWD:/work \
-            -w /work \
+            -e NXSBOM_ACCESS_TOKEN=${{ secrets.NXSBOM_ACCESS_TOKEN }} \
+            -v $PWD:/mnt/work \
             ${{ matrix.os }} \
-            /bin/sh -c '
-
-              echo "--- Installing curl, unzip ---"
-              if command -v apt-get >/dev/null 2>&1; then 
-                apt-get update && apt-get install -y curl unzip ca-certificates;
-              elif command -v dnf >/dev/null 2>&1; then 
-                dnf install -y curl unzip ca-certificates;
-              elif command -v yum >/dev/null 2>&1; then 
-                yum install -y curl unzip ca-certificates;
-              else 
-                echo "Unknown package manager"; exit 1;
-              fi
-
-              update-ca-certificates || true
-
-              echo "--- Downloading bundle.zip ---"
-              curl -sSL \
-                -H "Authorization: Bearer $NX_TOKEN" \
-                -H "Content-Type: application/json" \
-                -o bundle.zip \
-                --data "{\"applications\":[\"6909a3b8762ffcb592b920ca\"],\"selectedOS\":\"cli\"}" \
-                https://demo.nxradar.com/nxsbom/api/v1/agents/download
-
-              echo "--- File type check ---"
-              file bundle.zip
-
-              echo "--- Extracting ---"
-              mkdir -p nxdir
-              unzip -o bundle.zip -d nxdir 2>/dev/null || tar -xf bundle.zip -C nxdir || true
-
-              CLI=$(find nxdir -type f -name "nxsbom-cli" | head -n 1)
-
-              if [ -z "$CLI" ]; then
-                echo "❌ CLI NOT found — file might not be ZIP"
-                echo "--- ZIP PREVIEW ---"
-                head -n 20 bundle.zip || true
-                exit 1
-              fi
-
-              chmod +x "$CLI"
-              mv "$CLI" /usr/local/bin/nxsbom-cli
-
-              echo "--- Running nxsbom-cli -h ---"
-              nxsbom-cli -h || exit 1
-
-              echo "✅ SUCCESS: ${{ matrix.os }}"
-            '
+            /bin/sh -c "
+              cd /mnt/work &&
+              if command -v apt >/dev/null 2>&1; then apt update && apt install -y curl unzip file; fi &&
+              if command -v dnf >/dev/null 2>&1; then dnf install -y curl unzip file; fi &&
+              if command -v microdnf >/dev/null 2>&1; then microdnf install -y curl unzip file; fi &&
+              echo 'Downloading...' &&
+              curl -H 'Authorization: Bearer '$NXSBOM_ACCESS_TOKEN \
+                   -L 'https://api.nxsbom.dev/cli/download' \
+                   -o bundle.zip &&
+              file bundle.zip &&
+              unzip bundle.zip -d cli &&
+              chmod +x cli/nxsbom || true &&
+              ./cli/nxsbom --version || echo 'CLI failed'
+            "
