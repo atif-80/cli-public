@@ -11,7 +11,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ✅ Working ones (unchanged)
           - os: ubuntu-24.04
             container: ""
           - os: fedora
@@ -22,8 +21,6 @@ jobs:
             container: "archlinux:latest"
           - os: kali
             container: "kalilinux/kali-rolling"
-
-          # ✅ Known glibc errors (unchanged)
           - os: centos
             container: "quay.io/centos/centos:stream9"
           - os: rhel
@@ -36,8 +33,6 @@ jobs:
             container: "amazonlinux:2023"
           - os: rocky
             container: "rockylinux:9"
-
-          # 🧩 Problematic (patched below)
           - os: alpine
             container: "alpine:latest"
           - os: opensuse
@@ -49,27 +44,28 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      # ✅ Amazon Linux pre-install tar
+      # ✅ Amazon Linux (unchanged)
       - name: Pre-install tar for Amazon Linux
         if: matrix.os == 'amazon'
         run: |
           yum update -y || true
           yum install -y tar gzip || true
 
-      # ✅ openSUSE — install tar before checkout
+      # ✅ openSUSE (unchanged)
       - name: Pre-install tar for openSUSE
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y tar gzip || true
 
-      # ✅ Clear Linux — install compiler & stdc++ before checkout
+      # ✅ Clear Linux — fix libstdc++ BEFORE checkout
       - name: Pre-install core libs for Clear Linux
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add os-core-dev c-basic dev-utils curl jq || true
+          swupd bundle-add os-core-dev c-basic dev-utils gcc gcc-runtime curl jq || true
           ldconfig || true
+          ls -l /usr/lib64/libstdc++.so* || true
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -136,26 +132,32 @@ jobs:
         if: matrix.os == 'rocky'
         run: yum install -y jq unzip file curl || true
 
-      # ✅ FIX 1: Alpine — install glibc package from sgerrand
+      # ✅ FIXED Alpine block
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache bash curl jq unzip file gcompat libgcc libstdc++ ca-certificates
-          # Add glibc compatibility (v2.39+)
-          curl -fsSL https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk -o /tmp/glibc.apk || true
-          apk add --allow-untrusted /tmp/glibc.apk || true
+          apk add --no-cache bash curl jq unzip file ca-certificates wget gcompat libgcc libstdc++ tzdata
+          # Install full glibc compatibility (sgerrand’s packages)
+          wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub
+          wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk
+          wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-bin-2.39-r0.apk
+          wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-i18n-2.39-r0.apk
+          apk add --no-cache --allow-untrusted glibc-2.39-r0.apk glibc-bin-2.39-r0.apk glibc-i18n-2.39-r0.apk || true
+          /usr/glibc-compat/bin/localedef -i en_US -f UTF-8 en_US.UTF-8 || true
           mkdir -p /lib64
           ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
+          echo "Alpine glibc setup complete"
+          ldd --version || true
 
-      # ✅ openSUSE — now okay, glibc < 2.39 expected
+      # ✅ openSUSE (unchanged)
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
 
-      # ✅ Clear Linux — ensure stdc++ now available post-checkout
+      # ✅ Clear Linux (post-checkout setup)
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
@@ -163,7 +165,7 @@ jobs:
           swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic gcc-basic || true
           ldconfig || true
 
-      # ✅ Download CLI binary
+      # ✅ Download CLI binary (unchanged)
       - name: Download nxsbom-cli
         run: |
           mkdir -p cli_dir
@@ -171,7 +173,7 @@ jobs:
           chmod +x cli_dir/nxsbom-cli || true
           ls -al cli_dir
 
-      # ✅ Run CLI test for each distro (no hardcoding)
+      # ✅ Run CLI Test (unchanged)
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
