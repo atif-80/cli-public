@@ -11,11 +11,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ✅ Existing ones (UNCHANGED)
+          # ✅ Working ones (unchanged)
           - os: ubuntu-24.04
             container: ""
           - os: fedora
             container: "fedora:latest"
+          - os: debian
+            container: "debian:latest"
+          - os: arch
+            container: "archlinux:latest"
+          - os: kali
+            container: "kalilinux/kali-rolling"
+
+          # ✅ Known glibc errors (unchanged)
           - os: centos
             container: "quay.io/centos/centos:stream9"
           - os: rhel
@@ -26,53 +34,22 @@ jobs:
             container: "oraclelinux:9"
           - os: amazon
             container: "amazonlinux:2023"
-
-          # ✅ **New Distros**
-          - os: debian
-            container: "debian:latest"
-          - os: alpine
-            container: "alpine:latest"
-          - os: arch
-            container: "archlinux:latest"
-          - os: opensuse
-            container: "opensuse/leap:latest"
-          - os: kali
-            container: "kalilinux/kali-rolling"
           - os: rocky
             container: "rockylinux:9"
+
+          # 🧩 Problematic (fixed below)
+          - os: alpine
+            container: "alpine:latest"
+          - os: opensuse
+            container: "opensuse/leap:latest"
           - os: clearlinux
             container: "clearlinux:latest"
-
-          # ⚠️ COMMENTED — no official images / break CI / special init needed
-          # - os: linuxmint
-          #   container: "linuxmintd/mint21-amd64"   # unofficial, breaks apt trust
-          # - os: elementary
-          #   container: "quay.io/elementary/docker"
-          # - os: manjaro
-          #   container: "manjarolinux/base"
-          # - os: gentoo
-          #   container: "gentoo/stage3"
-          # - os: slackware
-          #   container: "vbatts/slackware"
-          # - os: antiX
-          #   container: "antixlinux/base"
-          # - os: popos
-          #   container: "popos/base"
-          # - os: kde-neon
-          #   container: "kdeneon/all"
-          # - os: scientific
-          #   container: "scientificlinux/sl"     # EOL
-          # - os: cloudlinux
-          #   container: "cloudlinux/cloudlinux" # requires subscription
-          # - os: asahi
-          #   container: ""                      # ARM only, no GH Actions x86 image
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-
-      # ✅ Amazon Linux pre-install tar
+      # Amazon Linux pre-install tar
       - name: Pre-install tar for Amazon Linux
         if: matrix.os == 'amazon'
         run: |
@@ -82,86 +59,101 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # ✅ Existing unchanged sections (Ubuntu/Fedora/CentOS/RHEL/Alma/Oracle)
+      # Ubuntu (unchanged)
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
           sudo apt install -y unzip jq file curl
 
+      # Fedora (unchanged)
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
         run: dnf install -y curl jq unzip file
 
-      - name: Install deps (CentOS)
-        if: matrix.os == 'centos'
-        run: yum install -y jq unzip file --skip-broken || true
-
-      - name: Install deps (RHEL)
-        if: matrix.os == 'rhel'
-        run: yum install -y jq unzip file curl || true
-
-      - name: Install deps (AlmaLinux)
-        if: matrix.os == 'alma'
-        run: yum install -y jq unzip file curl || true
-
-      - name: Install deps (Oracle)
-        if: matrix.os == 'oracle'
-        run: yum install -y jq unzip file curl || true
-
-      - name: Install deps (Amazon Linux)
-        if: matrix.os == 'amazon'
-        run: yum install -y jq unzip file tar gzip git curl || true
-
-      # ✅ New OS package handlers
+      # Debian (unchanged)
       - name: Install deps (Debian)
         if: matrix.os == 'debian'
         run: |
           apt update
           apt install -y curl jq unzip file || true
 
-      - name: Install deps (Alpine)
-        if: matrix.os == 'alpine'
-        run: |
-          apk update
-          apk add curl jq unzip file || true
-
+      # Arch (unchanged)
       - name: Install deps (Arch)
         if: matrix.os == 'arch'
         run: |
           pacman -Sy --noconfirm curl jq unzip file || true
 
-      - name: Install deps (openSUSE)
-        if: matrix.os == 'opensuse'
-        run: |
-          zypper refresh
-          zypper install -y curl jq unzip file || true
-
+      # Kali (unchanged)
       - name: Install deps (Kali)
         if: matrix.os == 'kali'
         run: |
           apt update
           apt install -y curl jq unzip file || true
 
-      - name: Install deps (Rocky Linux)
-        if: matrix.os == 'rocky'
-        run: |
-          yum install -y jq unzip file curl || true
+      # CentOS (unchanged)
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
+        run: yum install -y jq unzip file --skip-broken || true
 
+      # RHEL (unchanged)
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: yum install -y jq unzip file curl || true
+
+      # Alma (unchanged)
+      - name: Install deps (AlmaLinux)
+        if: matrix.os == 'alma'
+        run: yum install -y jq unzip file curl || true
+
+      # Oracle (unchanged)
+      - name: Install deps (Oracle Linux)
+        if: matrix.os == 'oracle'
+        run: yum install -y jq unzip file curl || true
+
+      # Amazon (unchanged)
+      - name: Install deps (Amazon Linux)
+        if: matrix.os == 'amazon'
+        run: yum install -y jq unzip file tar gzip git curl || true
+
+      # Rocky (unchanged)
+      - name: Install deps (Rocky)
+        if: matrix.os == 'rocky'
+        run: yum install -y jq unzip file curl || true
+
+      # ✅ FIX 1: Alpine – binary needs musl loader path
+      - name: Install deps (Alpine)
+        if: matrix.os == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq unzip file libc6-compat bash || true
+          # Add /lib64 symlink for musl-based images to find dynamic linker
+          mkdir -p /lib64
+          ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
+
+      # ✅ FIX 2: openSUSE – tar missing during checkout
+      - name: Install deps (openSUSE)
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh
+          zypper install -y curl jq unzip file tar gzip || true
+
+      # ✅ FIX 3: Clear Linux – missing libstdc++
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add curl jq unzip file || true
+          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils || true
 
-      # ✅ Download CLI
+      # ✅ Download nxsbom-cli
       - name: Download nxsbom-cli
         run: |
           mkdir -p cli_dir
           curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli || true
           chmod +x cli_dir/nxsbom-cli || true
+          ls -al cli_dir
 
-      # ✅ Execute and show REAL glibc errors
+      # ✅ Run CLI Test — unchanged logic
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
