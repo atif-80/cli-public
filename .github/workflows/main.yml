@@ -37,7 +37,7 @@ jobs:
           - os: rocky
             container: "rockylinux:9"
 
-          # 🧩 Problematic (fixed below)
+          # 🧩 Problematic (patched)
           - os: alpine
             container: "alpine:latest"
           - os: opensuse
@@ -49,12 +49,26 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      # Amazon Linux pre-install tar
+      # ✅ Pre-install tar for Amazon (unchanged)
       - name: Pre-install tar for Amazon Linux
         if: matrix.os == 'amazon'
         run: |
           yum update -y || true
           yum install -y tar gzip || true
+
+      # ✅ FIX 1: openSUSE — install tar BEFORE checkout
+      - name: Pre-install tar for openSUSE
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh
+          zypper install -y tar gzip || true
+
+      # ✅ FIX 2: Clear Linux — pre-install C++ libs BEFORE checkout
+      - name: Pre-install core libs for Clear Linux
+        if: matrix.os == 'clearlinux'
+        run: |
+          swupd update || true
+          swupd bundle-add os-core-dev c-basic dev-utils curl || true
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -121,29 +135,29 @@ jobs:
         if: matrix.os == 'rocky'
         run: yum install -y jq unzip file curl || true
 
-      # ✅ FIX 1: Alpine – binary needs musl loader path
+      # ✅ FIX 3: Alpine — missing libgcc & glibc fallback
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq unzip file libc6-compat bash || true
-          # Add /lib64 symlink for musl-based images to find dynamic linker
+          apk add --no-cache bash curl jq unzip file gcompat libgcc libstdc++ libc6-compat || true
+          # Provide glibc loader compatibility
           mkdir -p /lib64
           ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
 
-      # ✅ FIX 2: openSUSE – tar missing during checkout
+      # ✅ openSUSE (now includes tar fix)
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
-          zypper install -y curl jq unzip file tar gzip || true
+          zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
 
-      # ✅ FIX 3: Clear Linux – missing libstdc++
+      # ✅ Clear Linux (now includes libstdc++)
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils || true
+          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic || true
 
       # ✅ Download nxsbom-cli
       - name: Download nxsbom-cli
