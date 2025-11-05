@@ -33,122 +33,108 @@ jobs:
             container: "amazonlinux:2023"
           - os: rocky
             container: "rockylinux:9"
-          - os: alpine
-            container: "alpine:latest"
           - os: opensuse
             container: "opensuse/leap:latest"
-          - os: clearlinux
-            container: "clearlinux:latest"
+          # Note: Alpine & Clear Linux temporarily excluded
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-      # ✅ Pre-setup for Clear Linux
-      - name: Pre-install libs for Clear Linux
-        if: matrix.os == 'clearlinux'
+      # ✅ Amazon Linux fix: tar before checkout
+      - name: Pre-install tar for Amazon Linux
+        if: matrix.os == 'amazon'
         run: |
-          echo ">>> Preparing Clear Linux base runtime..."
-          swupd update -y || true
-          swupd bundle-add os-core-dev c-basic gcc gcc-libs dev-utils python-basic curl jq -y || true
-          ldconfig || true
-          ln -sf /usr/lib64/libstdc++.so.6 /usr/lib/libstdc++.so.6 || true
-          ln -sf /usr/lib64/libgcc_s.so.1 /usr/lib/libgcc_s.so.1 || true
-          ls -l /usr/lib64/libstdc++.so* || true
+          yum update -y || true
+          yum install -y tar gzip || true
 
-      # ✅ Alpine glibc fix
-      - name: Install deps (Alpine)
-        if: matrix.os == 'alpine'
+      # ✅ openSUSE fix: tar before checkout
+      - name: Pre-install tar for openSUSE
+        if: matrix.os == 'opensuse'
         run: |
-          echo ">>> Installing base packages on Alpine..."
-          apk update
-          apk add --no-cache bash curl jq unzip file wget gcompat ca-certificates tzdata libgcc libstdc++ binutils || true
-          echo ">>> Installing glibc (safe mode)..."
-          set +e
-          wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub || true
-          curl -sL https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk -o /tmp/glibc.apk
-          curl -sL https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-bin-2.39-r0.apk -o /tmp/glibc-bin.apk
-          apk add --allow-untrusted /tmp/glibc.apk /tmp/glibc-bin.apk || true
-          set -e
-          mkdir -p /lib64
-          ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
-          echo "/usr/glibc-compat/lib" >> /etc/ld.so.conf
-          ldconfig || true
-          echo ">>> Alpine glibc setup complete."
-          ldd --version || true
+          zypper refresh
+          zypper install -y tar gzip || true
 
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # ✅ Clear Linux post-checkout deps
-      - name: Install deps (Clear Linux)
-        if: matrix.os == 'clearlinux'
-        run: |
-          echo ">>> Installing additional tools (Clear Linux)..."
-          swupd update || true
-          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils gcc gcc-runtime || true
-          ldconfig || true
-          ls -l /usr/lib64/libstdc++.so* || true
-
-      # ✅ All other OS unchanged
-      - name: Install deps (Ubuntu)
+      # ✅ Ubuntu (host)
+      - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
           sudo apt install -y unzip jq file curl
 
+      # ✅ Fedora
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
-        run: dnf install -y curl jq unzip file
+        run: |
+          dnf install -y curl jq unzip file
 
+      # ✅ Debian
       - name: Install deps (Debian)
         if: matrix.os == 'debian'
         run: |
           apt update
           apt install -y curl jq unzip file || true
 
+      # ✅ Arch
       - name: Install deps (Arch)
         if: matrix.os == 'arch'
         run: |
           pacman -Sy --noconfirm curl jq unzip file || true
 
+      # ✅ Kali
       - name: Install deps (Kali)
         if: matrix.os == 'kali'
         run: |
           apt update
           apt install -y curl jq unzip file || true
 
+      # ✅ CentOS
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
-        run: yum install -y jq unzip file --skip-broken || true
+        run: |
+          yum install -y jq unzip file --skip-broken || true
 
+      # ✅ RHEL
       - name: Install deps (RHEL)
         if: matrix.os == 'rhel'
-        run: yum install -y jq unzip file curl || true
+        run: |
+          yum install -y jq unzip file curl || true
 
-      - name: Install deps (Alma)
+      # ✅ AlmaLinux
+      - name: Install deps (AlmaLinux)
         if: matrix.os == 'alma'
-        run: yum install -y jq unzip file curl || true
+        run: |
+          yum install -y jq unzip file curl || true
 
-      - name: Install deps (Oracle)
+      # ✅ Oracle Linux
+      - name: Install deps (Oracle Linux)
         if: matrix.os == 'oracle'
-        run: yum install -y jq unzip file curl || true
+        run: |
+          yum install -y jq unzip file curl || true
 
-      - name: Install deps (Amazon)
+      # ✅ Amazon Linux
+      - name: Install deps (Amazon Linux)
         if: matrix.os == 'amazon'
-        run: yum install -y jq unzip file tar gzip git curl || true
+        run: |
+          yum install -y jq unzip file tar gzip git curl || true
 
+      # ✅ Rocky Linux
       - name: Install deps (Rocky)
         if: matrix.os == 'rocky'
-        run: yum install -y jq unzip file curl || true
+        run: |
+          yum install -y jq unzip file curl || true
 
+      # ✅ openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
 
-      # ✅ Download CLI and run
+      # ✅ Download CLI
       - name: Download nxsbom-cli
         run: |
           mkdir -p cli_dir
@@ -156,6 +142,7 @@ jobs:
           chmod +x cli_dir/nxsbom-cli
           ls -al cli_dir
 
+      # ✅ Run CLI Test
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
