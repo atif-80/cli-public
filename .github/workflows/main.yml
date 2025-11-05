@@ -35,20 +35,23 @@ jobs:
             container: "rockylinux:9"
           - os: opensuse
             container: "opensuse/leap:latest"
-          # Note: Alpine & Clear Linux temporarily excluded
+          - os: alpine
+            container: "alpine:latest"
+          - os: clearlinux
+            container: "clearlinux:latest"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-      # ✅ Amazon Linux fix: tar before checkout
+      # ✅ Amazon Linux: fix missing tar before checkout
       - name: Pre-install tar for Amazon Linux
         if: matrix.os == 'amazon'
         run: |
           yum update -y || true
           yum install -y tar gzip || true
 
-      # ✅ openSUSE fix: tar before checkout
+      # ✅ openSUSE: fix missing tar before checkout
       - name: Pre-install tar for openSUSE
         if: matrix.os == 'opensuse'
         run: |
@@ -58,7 +61,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # ✅ Ubuntu (host)
+      # ✅ Ubuntu host
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
@@ -133,6 +136,29 @@ jobs:
         run: |
           zypper refresh
           zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
+
+      # ✅ Alpine (keep as-is; failure expected)
+      - name: Install deps (Alpine)
+        if: matrix.os == 'alpine'
+        run: |
+          echo ">>> Installing base packages on Alpine..."
+          apk update
+          apk add --no-cache bash curl jq unzip file wget gcompat ca-certificates tzdata libgcc libstdc++ binutils || true
+          echo ">>> Attempting glibc setup (expected failure on Alpine)..."
+          wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub || true
+          curl -sL https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk -o /tmp/glibc.apk
+          apk add --allow-untrusted /tmp/glibc.apk || true
+          ldd --version || true
+
+      # ✅ Clear Linux (keep as-is; failure expected)
+      - name: Install deps (Clear Linux)
+        if: matrix.os == 'clearlinux'
+        run: |
+          echo ">>> Installing base tools on Clear Linux..."
+          swupd update -y || true
+          swupd bundle-add os-core-dev c-basic gcc gcc-libs dev-utils python-basic curl jq -y || true
+          ldconfig || true
+          ls -l /usr/lib64/libstdc++.so* || true
 
       # ✅ Download CLI
       - name: Download nxsbom-cli
