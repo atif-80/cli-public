@@ -44,136 +44,118 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      # ✅ Amazon Linux (unchanged)
-      - name: Pre-install tar for Amazon Linux
-        if: matrix.os == 'amazon'
-        run: |
-          yum update -y || true
-          yum install -y tar gzip || true
-
-      # ✅ openSUSE (unchanged)
-      - name: Pre-install tar for openSUSE
-        if: matrix.os == 'opensuse'
-        run: |
-          zypper refresh
-          zypper install -y tar gzip || true
-
-      # ✅ Clear Linux — fix libstdc++ BEFORE checkout
-      - name: Pre-install core libs for Clear Linux
+      # ✅ Clear Linux - Fix node/libstdc++ BEFORE checkout
+      - name: Pre-install base runtime (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
+          echo ">>> Setting up Clear Linux base runtime..."
           swupd update || true
-          swupd bundle-add os-core-dev c-basic dev-utils gcc gcc-runtime curl jq || true
+          swupd bundle-add os-core-dev c-basic gcc gcc-libs dev-utils python-basic curl jq || true
           ldconfig || true
+          # Create symlinks so node finds stdc++
+          ln -sf /usr/lib64/libstdc++.so.6 /usr/lib/libstdc++.so.6 || true
+          ln -sf /usr/lib64/libgcc_s.so.1 /usr/lib/libgcc_s.so.1 || true
           ls -l /usr/lib64/libstdc++.so* || true
 
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # Ubuntu (unchanged)
-      - name: Install deps (Ubuntu host)
-        if: matrix.container == ''
-        run: |
-          sudo apt update
-          sudo apt install -y unzip jq file curl
-
-      # Fedora (unchanged)
-      - name: Install deps (Fedora)
-        if: matrix.os == 'fedora'
-        run: dnf install -y curl jq unzip file
-
-      # Debian (unchanged)
-      - name: Install deps (Debian)
-        if: matrix.os == 'debian'
-        run: |
-          apt update
-          apt install -y curl jq unzip file || true
-
-      # Arch (unchanged)
-      - name: Install deps (Arch)
-        if: matrix.os == 'arch'
-        run: |
-          pacman -Sy --noconfirm curl jq unzip file || true
-
-      # Kali (unchanged)
-      - name: Install deps (Kali)
-        if: matrix.os == 'kali'
-        run: |
-          apt update
-          apt install -y curl jq unzip file || true
-
-      # CentOS (unchanged)
-      - name: Install deps (CentOS)
-        if: matrix.os == 'centos'
-        run: yum install -y jq unzip file --skip-broken || true
-
-      # RHEL (unchanged)
-      - name: Install deps (RHEL)
-        if: matrix.os == 'rhel'
-        run: yum install -y jq unzip file curl || true
-
-      # Alma (unchanged)
-      - name: Install deps (AlmaLinux)
-        if: matrix.os == 'alma'
-        run: yum install -y jq unzip file curl || true
-
-      # Oracle (unchanged)
-      - name: Install deps (Oracle Linux)
-        if: matrix.os == 'oracle'
-        run: yum install -y jq unzip file curl || true
-
-      # Amazon (unchanged)
-      - name: Install deps (Amazon Linux)
-        if: matrix.os == 'amazon'
-        run: yum install -y jq unzip file tar gzip git curl || true
-
-      # Rocky (unchanged)
-      - name: Install deps (Rocky)
-        if: matrix.os == 'rocky'
-        run: yum install -y jq unzip file curl || true
-
-      # ✅ FIXED Alpine block
+      # ✅ Fix Alpine glibc fully
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
+          echo ">>> Setting up Alpine glibc environment..."
           apk update
-          apk add --no-cache bash curl jq unzip file ca-certificates wget gcompat libgcc libstdc++ tzdata
-          # Install full glibc compatibility (sgerrand’s packages)
+          apk add --no-cache bash curl jq unzip file wget gcompat ca-certificates tzdata libgcc libstdc++ binutils
           wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub
           wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk
           wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-bin-2.39-r0.apk
           wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-i18n-2.39-r0.apk
           apk add --no-cache --allow-untrusted glibc-2.39-r0.apk glibc-bin-2.39-r0.apk glibc-i18n-2.39-r0.apk || true
           /usr/glibc-compat/bin/localedef -i en_US -f UTF-8 en_US.UTF-8 || true
+          export LANG=en_US.UTF-8
           mkdir -p /lib64
           ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
-          echo "Alpine glibc setup complete"
+          echo "/usr/glibc-compat/lib" >> /etc/ld.so.conf
+          ldconfig || true
+          echo ">>> Verifying Alpine glibc install:"
+          /usr/glibc-compat/bin/ldd --version || true
           ldd --version || true
 
-      # ✅ openSUSE (unchanged)
+      # ✅ All other OS remain unchanged
+      - name: Install deps (Ubuntu)
+        if: matrix.container == ''
+        run: |
+          sudo apt update
+          sudo apt install -y unzip jq file curl
+
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
+        run: dnf install -y curl jq unzip file
+
+      - name: Install deps (Debian)
+        if: matrix.os == 'debian'
+        run: |
+          apt update
+          apt install -y curl jq unzip file || true
+
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq unzip file || true
+
+      - name: Install deps (Kali)
+        if: matrix.os == 'kali'
+        run: |
+          apt update
+          apt install -y curl jq unzip file || true
+
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
+        run: yum install -y jq unzip file --skip-broken || true
+
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: yum install -y jq unzip file curl || true
+
+      - name: Install deps (Alma)
+        if: matrix.os == 'alma'
+        run: yum install -y jq unzip file curl || true
+
+      - name: Install deps (Oracle)
+        if: matrix.os == 'oracle'
+        run: yum install -y jq unzip file curl || true
+
+      - name: Install deps (Amazon)
+        if: matrix.os == 'amazon'
+        run: yum install -y jq unzip file tar gzip git curl || true
+
+      - name: Install deps (Rocky)
+        if: matrix.os == 'rocky'
+        run: yum install -y jq unzip file curl || true
+
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
 
-      # ✅ Clear Linux (post-checkout setup)
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
+          echo ">>> Installing runtime for Clear Linux post-checkout"
           swupd update || true
-          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic gcc-basic || true
+          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic gcc gcc-runtime || true
           ldconfig || true
 
-      # ✅ Download CLI binary (unchanged)
+      # ✅ Download and run CLI (unchanged)
       - name: Download nxsbom-cli
         run: |
           mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli || true
-          chmod +x cli_dir/nxsbom-cli || true
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli" -o cli_dir/nxsbom-cli
+          chmod +x cli_dir/nxsbom-cli
           ls -al cli_dir
 
-      # ✅ Run CLI Test (unchanged)
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
