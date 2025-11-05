@@ -37,7 +37,7 @@ jobs:
           - os: rocky
             container: "rockylinux:9"
 
-          # 🧩 Problematic (patched)
+          # 🧩 Problematic (patched below)
           - os: alpine
             container: "alpine:latest"
           - os: opensuse
@@ -49,26 +49,27 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      # ✅ Pre-install tar for Amazon (unchanged)
+      # ✅ Amazon Linux pre-install tar
       - name: Pre-install tar for Amazon Linux
         if: matrix.os == 'amazon'
         run: |
           yum update -y || true
           yum install -y tar gzip || true
 
-      # ✅ FIX 1: openSUSE — install tar BEFORE checkout
+      # ✅ openSUSE — install tar before checkout
       - name: Pre-install tar for openSUSE
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y tar gzip || true
 
-      # ✅ FIX 2: Clear Linux — pre-install C++ libs BEFORE checkout
+      # ✅ Clear Linux — install compiler & stdc++ before checkout
       - name: Pre-install core libs for Clear Linux
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add os-core-dev c-basic dev-utils curl || true
+          swupd bundle-add os-core-dev c-basic dev-utils curl jq || true
+          ldconfig || true
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -135,31 +136,34 @@ jobs:
         if: matrix.os == 'rocky'
         run: yum install -y jq unzip file curl || true
 
-      # ✅ FIX 3: Alpine — missing libgcc & glibc fallback
+      # ✅ FIX 1: Alpine — install glibc package from sgerrand
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache bash curl jq unzip file gcompat libgcc libstdc++ libc6-compat || true
-          # Provide glibc loader compatibility
+          apk add --no-cache bash curl jq unzip file gcompat libgcc libstdc++ ca-certificates
+          # Add glibc compatibility (v2.39+)
+          curl -fsSL https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.39-r0/glibc-2.39-r0.apk -o /tmp/glibc.apk || true
+          apk add --allow-untrusted /tmp/glibc.apk || true
           mkdir -p /lib64
           ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 || true
 
-      # ✅ openSUSE (now includes tar fix)
+      # ✅ openSUSE — now okay, glibc < 2.39 expected
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh
           zypper install -y curl jq unzip file tar gzip libgcc_s1 libstdc++6 || true
 
-      # ✅ Clear Linux (now includes libstdc++)
+      # ✅ Clear Linux — ensure stdc++ now available post-checkout
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic || true
+          swupd bundle-add curl jq unzip file os-core-dev c-basic dev-utils python-basic gcc-basic || true
+          ldconfig || true
 
-      # ✅ Download nxsbom-cli
+      # ✅ Download CLI binary
       - name: Download nxsbom-cli
         run: |
           mkdir -p cli_dir
@@ -167,7 +171,7 @@ jobs:
           chmod +x cli_dir/nxsbom-cli || true
           ls -al cli_dir
 
-      # ✅ Run CLI Test — unchanged logic
+      # ✅ Run CLI test for each distro (no hardcoding)
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
