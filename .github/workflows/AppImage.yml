@@ -1,0 +1,164 @@
+name: Test nxsbom-cli AppImage (Multi-Distro Matrix)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test-cli-appimage:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: fedora
+            container: "fedora:latest"
+          - os: debian
+            container: "debian:latest"
+          - os: arch
+            container: "archlinux:latest"
+          - os: kali
+            container: "kalilinux/kali-rolling"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma
+            container: "almalinux:latest"
+          - os: oracle
+            container: "oraclelinux:9"
+          - os: amazon
+            container: "amazonlinux:2023"
+          - os: rocky
+            container: "rockylinux:9"
+          - os: opensuse
+            container: "opensuse/leap:latest"
+          - os: alpine
+            container: "alpine:latest"
+          - os: clearlinux
+            container: "clearlinux:latest"
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      #######################################################
+      #        INSTALL REQUIRED PACKAGES PER DISTRO         #
+      #######################################################
+
+      # Ubuntu Host
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
+        run: |
+          sudo apt update
+          sudo apt install -y curl jq file unzip libfuse2 || true
+
+      # Fedora
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
+        run: |
+          dnf install -y curl jq file fuse fuse-libs
+
+      # Debian
+      - name: Install deps (Debian)
+        if: matrix.os == 'debian'
+        run: |
+          apt update
+          apt install -y curl jq file fuse3 || true
+
+      # Arch Linux
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq file fuse2 || true
+
+      # Kali Linux
+      - name: Install deps (Kali)
+        if: matrix.os == 'kali'
+        run: |
+          apt update
+          apt install -y curl jq file fuse3 || true
+
+      # CentOS Stream
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # RHEL UBI
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # AlmaLinux
+      - name: Install deps (AlmaLinux)
+        if: matrix.os == 'alma'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # Oracle Linux
+      - name: Install deps (Oracle)
+        if: matrix.os == 'oracle'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # Amazon Linux 2023
+      - name: Install deps (Amazon Linux)
+        if: matrix.os == 'amazon'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # Rocky Linux
+      - name: Install deps (Rocky)
+        if: matrix.os == 'rocky'
+        run: |
+          yum install -y curl jq file fuse fuse-libs || true
+
+      # openSUSE
+      - name: Install deps (openSUSE)
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh
+          zypper install -y curl jq file fuse libfuse2 || true
+
+      # Alpine (special handling)
+      - name: Install deps (Alpine)
+        if: matrix.os == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file fuse2 fuse libgcc libstdc++ gcompat || true
+          # Enable fuse
+          mkdir -p /dev/fuse || true
+          mknod -m 666 /dev/fuse c 10 229 || true
+
+      # Clear Linux (special handling)
+      - name: Install deps (Clear Linux)
+        if: matrix.os == 'clearlinux'
+        run: |
+          swupd update -y || true
+          swupd bundle-add os-core fuse libstdc++ curl jq binutils || true
+          ldconfig
+
+      #######################################################
+      #                 DOWNLOAD APPIMAGE                   #
+      #######################################################
+      - name: Download nxsbom-cli AppImage
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-x86_64.AppImage" -o cli_dir/nxsbom-cli.AppImage
+          chmod +x cli_dir/nxsbom-cli.AppImage
+          ls -al cli_dir
+
+      #######################################################
+      #                     RUN TEST                        #
+      #######################################################
+      - name: Run CLI Test
+        run: |
+          echo "Running on OS: ${{ matrix.os }}"
+          ./cli_dir/nxsbom-cli.AppImage --version || ./cli_dir/nxsbom-cli.AppImage -h
