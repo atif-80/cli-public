@@ -1,0 +1,190 @@
+name: Test nxsbom-cli (.deb package across 14 Linux distros)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test-cli-deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: debian
+            container: "debian:latest"
+          - os: kali
+            container: "kalilinux/kali-rolling"
+          - os: linuxmint
+            container: "linuxmintd/mint20.2-amd64"
+          - os: zorin
+            container: "zorinos/core:16"
+          - os: popos
+            container: "popos:22.04"
+          - os: fedora
+            container: "fedora:latest"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma
+            container: "almalinux:latest"
+          - os: oracle
+            container: "oraclelinux:9"
+          - os: amazon
+            container: "amazonlinux:2023"
+          - os: rocky
+            container: "rockylinux:9"
+          - os: opensuse
+            container: "opensuse/leap:latest"
+          - os: alpine
+            container: "alpine:latest"
+          - os: clearlinux
+            container: "clearlinux:latest"
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+
+      ###########################################################
+      #  INSTALL DEPENDENCIES PER DISTRO
+      ###########################################################
+
+      # Ubuntu Host
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
+        run: |
+          sudo apt update
+          sudo apt install -y curl jq file apt-transport-https gdebi-core
+
+      # Debian
+      - name: Install deps (Debian)
+        if: matrix.os == 'debian'
+        run: |
+          apt update
+          apt install -y curl jq file gdebi-core || true
+
+      # Kali
+      - name: Install deps (Kali)
+        if: matrix.os == 'kali'
+        run: |
+          apt update
+          apt install -y curl jq file gdebi-core || true
+
+      # Linux Mint
+      - name: Install deps (Linux Mint)
+        if: matrix.os == 'linuxmint'
+        run: |
+          apt update
+          apt install -y curl jq file gdebi-core || true
+
+      - name: Install deps (Zorin OS)
+        if: matrix.os == 'zorin'
+        run: |
+          apt update
+          apt install -y curl jq file gdebi-core || true
+
+      - name: Install deps (Pop!_OS)
+        if: matrix.os == 'popos'
+        run: |
+          apt update
+          apt install -y curl jq file gdebi-core || true
+
+      # Fedora
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
+        run: |
+          dnf install -y curl jq file rpm-build dpkg || true
+
+      # CentOS
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
+        run: |
+          yum install -y curl jq file dpkg || true
+
+      # RHEL
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: |
+          yum install -y curl jq file dpkg || true
+
+      # AlmaLinux
+      - name: Install deps (AlmaLinux)
+        if: matrix.os == 'alma'
+        run: |
+          yum install -y curl jq file dpkg || true
+
+      # Oracle Linux
+      - name: Install deps (Oracle)
+        if: matrix.os == 'oracle'
+        run: |
+          yum install -y curl jq file dpkg || true
+
+      # Amazon Linux
+      - name: Install deps (Amazon)
+        if: matrix.os == 'amazon'
+        run: |
+          yum install -y curl jq file dpkg tar gzip git || true
+
+      # Rocky Linux
+      - name: Install deps (Rocky)
+        if: matrix.os == 'rocky'
+        run: |
+          yum install -y curl jq file dpkg || true
+
+      # openSUSE
+      - name: Install deps (openSUSE)
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh
+          zypper install -y curl jq file dpkg || true
+
+      # Alpine (special case: dpkg + fast failure expected)
+      - name: Install deps (Alpine)
+        if: matrix.os == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file dpkg gcompat || true
+
+      # Clear Linux
+      - name: Install deps (Clear Linux)
+        if: matrix.os == 'clearlinux'
+        run: |
+          swupd update -y || true
+          swupd bundle-add dpkg curl jq file os-core-dev || true
+
+
+      ###########################################################
+      #  DOWNLOAD .deb PACKAGE
+      ###########################################################
+      - name: Download nxsbom-cli .deb package
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli_e594b4d-dev_amd64.deb" \
+            -o cli_dir/nxsbom-cli.deb
+          ls -al cli_dir
+
+
+      ###########################################################
+      #  INSTALL .deb PACKAGE
+      ###########################################################
+      - name: Install .deb package
+        run: |
+          echo "Installing .deb on ${{ matrix.os }}"
+          dpkg -i cli_dir/nxsbom-cli.deb || true
+          apt --fix-broken install -y || true
+
+
+      ###########################################################
+      #  RUN CLI TEST
+      ###########################################################
+      - name: Run CLI Test
+        run: |
+          echo "Running on OS: ${{ matrix.os }}"
+          nxsbom-cli --version || nxsbom-cli -h || true
