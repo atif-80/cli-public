@@ -1,9 +1,17 @@
 name: Test nxsbom-cli (.deb package across 14 Linux distros)
 
 on:
+  workflow_dispatch:
+
   push:
-    branches: ["main"]
+    paths:
+      - ".github/workflows/test-deb.yml"     # Run ONLY when THIS file changes
+      - "releases/**"                         # Optional: run when deb files updated
+
   pull_request:
+    paths:
+      - ".github/workflows/test-deb.yml"
+
 
 jobs:
   test-cli-deb:
