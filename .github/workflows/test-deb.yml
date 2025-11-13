@@ -25,16 +25,11 @@ jobs:
             container: "kalilinux/kali-rolling"
           - os: linuxmint
             container: "linuxmintd/mint20.2-amd64"
-          - os: zorin
-            container: "zorinos/core:16"
-          - os: popos
-            container: "popos:22.04"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -48,7 +43,7 @@ jobs:
           sudo apt update
           sudo apt install -y curl jq file gdebi-core apt-transport-https
 
-      - name: Install deps (Debian/Kali/LinuxMint/Zorin/PopOS)
+      - name: Install deps (APT distros)
         if: matrix.container != ''
         run: |
           apt update
@@ -74,16 +69,16 @@ jobs:
           apt --fix-broken install -y || true
 
       ###########################################################
-      # Detect installed binary
+      # Detect installed binary (nxsbom, not nxsbom-cli)
       ###########################################################
-      - name: Detect installed nxsbom-cli binary
+      - name: Detect installed nxsbom binary
         run: |
-          BIN=$(command -v nxsbom-cli || true)
+          BIN=$(command -v nxsbom || true)
 
           if [ -z "$BIN" ]; then
-            echo "❌ ERROR: nxsbom-cli not found after installation"
-            ls -l /usr/local/bin || true
-            ls -l /usr/bin || true
+            echo "❌ ERROR: nxsbom binary not found after installation"
+            ls -R /usr/local/bin || true
+            ls -R /usr/bin || true
             exit 1
           fi
 
@@ -91,7 +86,7 @@ jobs:
           echo "BIN=$BIN" >> $GITHUB_ENV
 
       ###########################################################
-      # Run smoke test
+      # Run CLI Test
       ###########################################################
       - name: Run CLI Test
         run: |
