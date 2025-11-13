@@ -48,9 +48,8 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-
       #############################################
-      # FIX checkout tar missing for openSUSE & amazon
+      # Fix checkout tar missing for openSUSE & Amazon
       #############################################
       - name: Pre-install tar for container (fix checkout)
         if: ${{ matrix.os == 'opensuse' || matrix.os == 'amazon' }}
@@ -70,6 +69,7 @@ jobs:
           echo "Matrix OS: ${{ matrix.os }}"
           cat /etc/os-release || true
 
+
       ###########################################################
       # INSTALL DEPS
       ###########################################################
@@ -78,44 +78,50 @@ jobs:
         if: ${{ matrix.container == '' }}
         run: |
           sudo apt update -y
-          sudo apt install -y curl jq file tar gzip libstdc++6
+          sudo apt install -y curl jq file tar gzip libstdc++6 findutils
 
       - name: Debian-family deps
         if: ${{ matrix.os == 'debian' || matrix.os == 'kali' }}
         run: |
           apt update -y
-          apt install -y curl jq file tar gzip libstdc++6 || true
+          apt install -y curl jq file tar gzip libstdc++6 findutils || true
 
       - name: Arch deps
         if: ${{ matrix.os == 'arch' }}
         run: |
-          pacman -Sy --noconfirm curl jq file tar gzip gcc-libs
+          pacman -Sy --noconfirm curl jq file tar gzip gcc-libs findutils
 
       - name: openSUSE deps
         if: ${{ matrix.os == 'opensuse' }}
         run: |
           zypper refresh
-          zypper install -y curl jq file tar gzip libstdc++6 || true
+          zypper install -y curl jq file tar gzip libstdc++6 findutils || true
 
       - name: Alpine deps
         if: ${{ matrix.os == 'alpine' }}
         run: |
           apk update
-          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat
+          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat findutils
 
       - name: ClearLinux deps
         if: ${{ matrix.os == 'clearlinux' }}
         run: |
-          swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++
+          swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++ findutils
 
       - name: RPM deps
         if: ${{ matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel'
              || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky'
              || matrix.os == 'amazon' }}
         run: |
-          (dnf install -y curl jq tar gzip file file-libs which || true)
-          (yum install -y curl jq tar gzip file file-libs which || true)
-          which file || echo "file missing"
+          (dnf install -y curl jq tar gzip file findutils || true)
+          (yum install -y curl jq tar gzip file findutils || true)
+
+      # Amazon Linux REQUIRED FIX
+      - name: Fix Amazon Linux missing tools
+        if: ${{ matrix.os == 'amazon' }}
+        run: |
+          yum install -y findutils tar gzip file || true
+
 
       ###########################################################
       # DOWNLOAD
@@ -127,8 +133,9 @@ jobs:
             -o cli_dir/nxsbom-cli.tar.gz
           ls -al cli_dir
 
+
       ###########################################################
-      # EXTRACT
+      # EXTRACT BINARY
       ###########################################################
       - name: Extract and install binary
         run: |
@@ -151,8 +158,9 @@ jobs:
           chmod +x "$BINARY"
           cp "$BINARY" /usr/local/bin/nxsbom-cli
 
+
       ###########################################################
-      # RUN --help
+      # RUN HELP TEST
       ###########################################################
       - name: Run CLI Test
         run: |
