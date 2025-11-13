@@ -52,11 +52,11 @@ jobs:
         uses: actions/checkout@v4
 
       ###########################################################
-      # INSTALL REQUIRED DEPS
+      #  INSTALL REQUIRED SOFTWARE PER DISTRO
       ###########################################################
 
       # Ubuntu host
-      - name: Install deps (Ubuntu Host)
+      - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
@@ -69,37 +69,37 @@ jobs:
           apt update
           apt install -y curl jq file tar gzip libstdc++6 || true
 
-      # Fedora / RPM Distros
-      - name: Install deps (RPM Family)
+      # RPM Distros Fix (FORCE INSTALL ALL REQUIRED TOOLS)
+      - name: Install deps (RPM distros)
         if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
         run: |
-          (dnf install -y curl jq file tar gzip libstdc++ || true)
-          (yum install -y curl jq file tar gzip libstdc++ || true)
+          yum install -y curl jq file findutils tar gzip libstdc++ || true
+          dnf install -y curl jq file findutils tar gzip libstdc++ || true
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh || true
-          zypper install -y curl jq file tar gzip libstdc++6 || true
+          zypper install -y curl jq file tar gzip libstdc++6 findutils || true
 
       # Alpine
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat || true
+          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat findutils || true
 
       # Clear Linux
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add curl jq os-core file-utils libstdc++ dev-utils || true
+          swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++ || true
           ldconfig
 
       ###########################################################
-      # DOWNLOAD TARGZ
+      #  DOWNLOAD TARGZ
       ###########################################################
       - name: Download nxsbom-cli tar.gz
         run: |
@@ -109,12 +109,12 @@ jobs:
           ls -al cli_dir
 
       ###########################################################
-      # EXTRACT + FIND ELF
+      #  EXTRACT & INSTALL
       ###########################################################
       - name: Extract and install
         run: |
           cd cli_dir
-          tar -xzf nxsbom-cli.tar.gz || (echo "❌ tar extraction failed"; exit 1)
+          tar -xzf nxsbom-cli.tar.gz
 
           echo ">>> Listing extracted files"
           ls -R .
@@ -133,7 +133,7 @@ jobs:
           ls -l /usr/local/bin/nxsbom-cli
 
       ###########################################################
-      # RUN TESTS
+      #  RUN CLI TEST
       ###########################################################
       - name: Run CLI Test (--help)
         run: |
