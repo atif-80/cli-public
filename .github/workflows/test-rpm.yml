@@ -60,6 +60,8 @@ jobs:
           (dnf install -y tar gzip file curl jq libstdc++.so.6 which || true)
           (zypper -n install tar gzip file curl jq libstdc++6 which || true)
           ldconfig || true
+          yum install -y tar gzip
+          zypper install -y tar gzip
 
       - name: Checkout repository
         uses: actions/checkout@v4
