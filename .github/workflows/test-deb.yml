@@ -26,7 +26,6 @@ jobs:
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
 
-    # enable privileged mode for dpkg inside containers
     container:
       image: ${{ matrix.container }}
       options: --privileged
@@ -35,25 +34,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      ###########################################################
-      # INSTALL DEPENDENCIES ON APT-BASED DISTROS
-      ###########################################################
+      #############################################################
+      # INSTALL DEPENDENCIES
+      #############################################################
 
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y curl jq file gdebi-core apt-transport-https
+          sudo apt install -y curl jq file arj tar xz-utils gdebi-core
 
       - name: Install deps (APT container distros)
         if: matrix.container != ''
         run: |
           apt update
-          apt install -y curl jq file gdebi-core apt-transport-https || true
+          apt install -y curl jq file arj tar xz-utils gdebi-core || true
 
-      ###########################################################
+      #############################################################
       # DOWNLOAD .deb PACKAGE
-      ###########################################################
+      #############################################################
 
       - name: Download nxsbom-cli .deb package
         run: |
@@ -62,40 +61,76 @@ jobs:
             -o cli_dir/nxsbom-cli.deb
           ls -al cli_dir
 
-      ###########################################################
-      # INSTALL THE .deb PACKAGE
-      ###########################################################
+      #############################################################
+      # TRY TO INSTALL USING DPKG
+      #############################################################
 
-      - name: Install .deb package
+      - name: Attempt dpkg install
+        id: dpkg_install
+        continue-on-error: true
         run: |
           echo "Installing .deb on ${{ matrix.os }}"
           dpkg -i cli_dir/nxsbom-cli.deb || true
           apt --fix-broken install -y || true
-          dpkg -l | grep nxsbom || true
 
-      ###########################################################
-      # DETECT INSTALLED BINARY (nxsbom)
-      ###########################################################
+          if command -v nxsbom >/dev/null 2>&1; then
+            echo "installed=true" >> $GITHUB_OUTPUT
+          else
+            echo "installed=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Detect installed nxsbom binary
+      #############################################################
+      # FALLBACK — IF DPKG FAILS, MANUALLY EXTRACT THE .DEB
+      #############################################################
+
+      - name: Fallback extract .deb package manually
+        if: steps.dpkg_install.outputs.installed == 'false'
         run: |
-          BIN=$(command -v nxsbom || true)
+          echo "⚠️ dpkg failed — performing manual extraction"
+          cd cli_dir
 
-          if [ -z "$BIN" ]; then
-            echo "❌ ERROR: nxsbom binary not found"
-            ls -R /usr/local/bin || true
-            ls -R /usr/bin || true
+          ar x nxsbom-cli.deb || true
+
+          # Extract data.tar.* (gz or xz depending on build)
+          if ls data.tar.xz >/dev/null 2>&1; then
+            tar -xf data.tar.xz
+          elif ls data.tar.gz >/dev/null 2>&1; then
+            tar -xf data.tar.gz
+          else
+            echo "❌ No data.tar archive found inside the .deb"
             exit 1
           fi
 
-          echo "Binary found at: $BIN"
+          echo "Searching for nxsbom binary..."
+          find . -type f -name "nxsbom*" -exec chmod +x {} \; -exec echo "FOUND {}" \; | tee ../binary.txt
+
+          BIN=$(grep FOUND ../binary.txt | awk '{print $2}' | head -n1)
+
+          if [ -z "$BIN" ]; then
+            echo "❌ No binary found inside extracted .deb"
+            exit 1
+          fi
+
+          echo "Using extracted binary: $BIN"
+          echo "BIN=$(realpath $BIN)" >> $GITHUB_ENV
+
+      #############################################################
+      # DETECT INSTALLED OR EXTRACTED BINARY
+      #############################################################
+
+      - name: Detect final binary path
+        if: steps.dpkg_install.outputs.installed == 'true'
+        run: |
+          BIN=$(command -v nxsbom)
+          echo "Installed binary located at: $BIN"
           echo "BIN=$BIN" >> $GITHUB_ENV
 
-      ###########################################################
-      # RUN CLI TEST
-      ###########################################################
+      #############################################################
+      # RUN THE CLI TEST
+      #############################################################
 
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
+          echo "Using binary: $BIN"
           $BIN --version || $BIN -h || true
