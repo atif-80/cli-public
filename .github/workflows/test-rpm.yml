@@ -55,12 +55,11 @@ jobs:
     steps:
       ##########################################################
       # Fix Amazon Linux & openSUSE BEFORE checkout
-      # (tar missing → GitHub checkout fails)
       ##########################################################
       - name: Pre-install tar for Amazon & openSUSE BEFORE checkout
         if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
         run: |
-          echo ">>> Pre-installing tar, gzip for ${ { matrix.distro } }"
+          echo ">>> Pre-installing tar, gzip for ${{ matrix.distro }}"
           (yum install -y tar gzip || true)
           (dnf install -y tar gzip || true)
           (zypper -n install tar gzip || true)
@@ -78,7 +77,7 @@ jobs:
           uname -a
 
       ##########################################################
-      # Install required dependencies per distro
+      # Install dependencies
       ##########################################################
       - name: Install deps (Fedora)
         if: matrix.distro == 'fedora'
@@ -86,13 +85,13 @@ jobs:
           dnf -y update || true
           dnf -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
 
-      - name: Install deps (CentOS Stream)
+      - name: Install deps (CentOS)
         if: matrix.distro == 'centos'
         run: |
           yum -y update || true
           yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
 
-      - name: Install deps (RHEL UBI)
+      - name: Install deps (RHEL)
         if: matrix.distro == 'rhel'
         run: |
           yum -y update || true
@@ -110,7 +109,7 @@ jobs:
           yum -y update || true
           yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
 
-      - name: Install deps (Oracle Linux)
+      - name: Install deps (Oracle)
         if: matrix.distro == 'oracle'
         run: |
           yum -y update || true
@@ -139,7 +138,7 @@ jobs:
           ls -lh cli_dir
 
       ##########################################################
-      # Install RPM using correct package manager
+      # Install RPM
       ##########################################################
       - name: Install RPM (dnf)
         if: matrix.pkgmgr == 'dnf'
@@ -157,14 +156,14 @@ jobs:
           zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
 
       ##########################################################
-      # Locate binary (installed as "nxsbom")
+      # Locate binary (installed as nxsbom)
       ##########################################################
       - name: Locate installed binary
         run: |
           BIN=$(command -v nxsbom || true)
           echo "Found: $BIN"
           if [ -z "$BIN" ]; then
-            echo "❌ Binary not found (expected for non-Fedora due to GLIBC issue)"
+            echo "❌ Binary not found (GLIBC error expected for non-Fedora)"
             exit 1
           fi
           echo "BIN=$BIN" >> $GITHUB_ENV
