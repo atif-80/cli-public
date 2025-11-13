@@ -44,57 +44,64 @@ jobs:
           - os: clearlinux
             container: "clearlinux:latest"
 
-    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    # if container is empty we run on host (Ubuntu); otherwise run inside the container image
+    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      ##############################################################
-      # INSTALL DEPENDENCIES
-      ##############################################################
+      - name: Print environment
+        run: |
+          echo "Matrix OS: ${{ matrix.os }}"
+          cat /etc/os-release 2>/dev/null || true
+          uname -a || true
+          echo "PATH: $PATH"
 
-      # Ubuntu host
+      ##################################################################
+      # Install per-distro dependencies (ensures file, tar, curl, jq)
+      # This block is defensive: installs both file and file-libs on RPM
+      ##################################################################
+
+      # Ubuntu host (when running without container)
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
-          sudo apt update
-          sudo apt install -y curl jq file tar gzip libstdc++6
+          sudo apt-get update -y || true
+          sudo apt-get install -y curl jq file tar gzip libstdc++6 || true
 
-      # Debian-based (Debian, Kali, Ubuntu containers)
-      - name: Install deps (Debian family)
-        if: matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'ubuntu-24.04'
+      # Debian / Kali / Zorin / Pop!_OS / LinuxMint family (APT)
+      - name: Install deps (Debian-family)
+        if: matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'linuxmint' || matrix.os == 'zorin' || matrix.os == 'popos'
         run: |
-          apt update || true
-          apt install -y curl jq file tar gzip libstdc++6 || true
+          set -e
+          apt-get update -y || true
+          apt-get install -y curl jq file tar gzip libstdc++6 || true
+          # If libfuse3 is required by AppImage flows elsewhere, don't fail here (tar path handles .tar.gz)
+          dpkg -l | grep -E "file|tar" || true
 
       # Arch Linux
       - name: Install deps (Arch)
         if: matrix.os == 'arch'
         run: |
-          pacman -Sy --noconfirm curl jq file tar gzip || true
-
-      # RPM-based (Fedora, CentOS, RHEL, Alma, Oracle, Rocky, Amazon)
-      - name: Install deps (RPM distros)
-        if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
-        run: |
-          dnf install -y curl jq tar gzip file libstdc++.so.6 || \
-          yum install -y curl jq tar gzip file libstdc++.so.6 || true
+          pacman -Sy --noconfirm curl jq file tar gzip libstdc++ || true
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh || true
-          zypper install -y curl jq file tar gzip libstdc++6 || true
+          zypper -n install curl jq file tar gzip libstdc++6 || true
 
-      # Alpine (musl)
+      # Alpine
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
-          apk update
+          apk update || true
           apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat || true
+          # Create /dev/fuse for AppImage experiments (best-effort)
+          mkdir -p /dev || true
 
       # Clear Linux
       - name: Install deps (Clear Linux)
@@ -102,47 +109,155 @@ jobs:
         run: |
           swupd update || true
           swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++ || true
-          ldconfig
+          ldconfig || true
 
-      ##############################################################
-      # DOWNLOAD .tar.gz
-      ##############################################################
+      # RPM family (Fedora, CentOS, RHEL, Alma, Oracle, Rocky, Amazon)
+      - name: Install deps (RPM-family: ensure file + file-libs + tar)
+        if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
+        run: |
+          set -e
+          echo ">>> Installing RPM dependencies for ${{ matrix.os }} (attempt dnf then yum)"
+          # Try dnf first (Fedora/modern)
+          if command -v dnf >/dev/null 2>&1; then
+            dnf -y makecache || true
+            dnf -y install curl jq tar gzip file file-libs which gzip || dnf -y install curl jq tar gzip file which || true
+          fi
+
+          # Try yum as fallback (CentOS/RHEL/older)
+          if command -v yum >/dev/null 2>&1; then
+            yum -y makecache || true
+            yum -y install -y curl jq tar gzip file file-libs which || yum -y install -y curl jq tar gzip file which || true
+          fi
+
+          # verify existence of file and tar; if missing try rpm-based fallback installs
+          if ! command -v file >/dev/null 2>&1; then
+            echo ">>> 'file' binary not found after install attempts — trying alternative installs"
+            if command -v dnf >/dev/null 2>&1; then
+              dnf -y install file || dnf -y install file-libs || true
+            else
+              yum -y install file || yum -y install file-libs || true
+            fi
+          fi
+
+          if ! command -v tar >/dev/null 2>&1; then
+            echo ">>> 'tar' binary not found after install attempts — trying alternative installs"
+            if command -v dnf >/dev/null 2>&1; then
+              dnf -y install tar || true
+            else
+              yum -y install tar || true
+            fi
+          fi
+
+          echo ">>> verification: which file = $(which file 2>/dev/null || echo 'missing')"
+          echo ">>> verification: which tar  = $(which tar 2>/dev/null || echo 'missing')"
+
+      ##################################################################
+      # Download .tar.gz package
+      ##################################################################
       - name: Download nxsbom-cli tar.gz
         run: |
+          set -e
           mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-glibc-x86_64.tar.gz" \
-            -o cli_dir/nxsbom-cli.tar.gz
-          ls -al cli_dir
+          echo "Downloading tar.gz from release v1.0"
+          curl -L -f "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-glibc-x86_64.tar.gz" -o cli_dir/nxsbom-cli.tar.gz
+          ls -lh cli_dir || true
 
-      ##############################################################
-      # EXTRACTION & BINARY INSTALL
-      ##############################################################
+      ##################################################################
+      # Extract & install (auto-detect ELF). Robust detection:
+      # - prefer `file` if available
+      # - fallback to checking ELF magic bytes if `file` missing
+      ##################################################################
       - name: Extract and install binary
         run: |
+          set -e
           cd cli_dir
-          tar -xzf nxsbom-cli.tar.gz
 
-          echo ">>> Listing extracted files"
-          ls -R .
+          echo ">>> Extracting archive"
+          # Use tar if available
+          if command -v tar >/dev/null 2>&1; then
+            tar -xzf nxsbom-cli.tar.gz
+          else
+            echo "❗ tar not found in PATH — attempting bsdtar or busybox tar"
+            if command -v bsdtar >/dev/null 2>&1; then
+              bsdtar -xzf nxsbom-cli.tar.gz
+            elif command -v busybox >/dev/null 2>&1; then
+              busybox tar -xzf nxsbom-cli.tar.gz
+            else
+              echo "❌ Cannot extract archive: no tar/bsdtar/busybox found"
+              exit 1
+            fi
+          fi
 
-          echo ">>> Searching for ELF binary using file command"
-          BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep -q ELF && echo "{}"' \; | head -n 1)
+          echo ">>> Listing extracted files:"
+          ls -R . || true
+
+          echo ">>> Searching for ELF binary"
+          BINARY_FILE=""
+          if command -v file >/dev/null 2>&1; then
+            # use file to find first ELF executable
+            BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep -E "ELF .* executable|ELF .* shared object" >/dev/null && echo "{}"' \; | head -n 1 || true)
+          fi
+
+          # fallback: look for files with ELF magic bytes
+          if [ -z "$BINARY_FILE" ]; then
+            BINARY_FILE=$(find . -type f -exec sh -c 'head -c4 "{}" 2>/dev/null | od -An -t x1 | tr -d " \n" | grep -iq "^7f454c46" && echo "{}"' \; | head -n 1 || true)
+          fi
 
           if [ -z "$BINARY_FILE" ]; then
-            echo "❌ ERROR: ELF binary not found, but deps installed — this should not happen"
+            echo "❌ ERROR: No ELF binary found inside tar.gz"
+            # print some context to help debugging
+            echo "Contents of cli_dir:"
+            ls -lR . || true
             exit 1
           fi
 
-          echo "Found ELF: $BINARY_FILE"
-          chmod +x "$BINARY_FILE"
+          echo "Found binary: $BINARY_FILE"
+          chmod +x "$BINARY_FILE" || true
 
-          cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
-          ls -l /usr/local/bin/nxsbom-cli
+          echo "Installing to /usr/local/bin/nxsbom-cli (requires write access)"
+          # Use sudo only when available and we are not root
+          if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+            sudo cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
+            sudo chmod +x /usr/local/bin/nxsbom-cli
+          else
+            cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
+            chmod +x /usr/local/bin/nxsbom-cli
+          fi
 
-      ##############################################################
-      # RUN TEST (SHOW GLIBC ERROR OR --HELP)
-      ##############################################################
-      - name: Run CLI Test
+          echo "Installed file listing:"
+          ls -l /usr/local/bin/nxsbom-cli || true
+
+      ##################################################################
+      # Run CLI smoke tests (do not hardcode -h output; just run help/version)
+      ##################################################################
+      - name: Run CLI Test (help/version)
         run: |
+          set -e
           echo "Running on OS: ${{ matrix.os }}"
-          nxsbom-cli --help || nxsbom-cli --version || true
+          if command -v nxsbom-cli >/dev/null 2>&1; then
+            echo "nxsbom-cli location: $(command -v nxsbom-cli)"
+            nxsbom-cli --version || nxsbom-cli -h
+          else
+            echo "nxsbom-cli not in PATH — attempting direct execution"
+            if [ -x /usr/local/bin/nxsbom-cli ]; then
+              /usr/local/bin/nxsbom-cli --version || /usr/local/bin/nxsbom-cli -h || true
+            else
+              echo "❌ nxsbom-cli not executable or not found"
+              exit 1
+            fi
+          fi
+
+      ##################################################################
+      # Cleanup (best-effort)
+      ##################################################################
+      - name: Cleanup (best-effort)
+        if: always()
+        run: |
+          set +e
+          echo "Removing installed binary (best-effort)"
+          if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+            sudo rm -f /usr/local/bin/nxsbom-cli || true
+          else
+            rm -f /usr/local/bin/nxsbom-cli || true
+          fi
+          echo "Done."
