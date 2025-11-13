@@ -2,11 +2,9 @@ name: Test nxsbom-cli (.deb package on APT-based distros)
 
 on:
   workflow_dispatch:
-
   push:
     paths:
       - ".github/workflows/test-deb.yml"
-
   pull_request:
     paths:
       - ".github/workflows/test-deb.yml"
@@ -27,14 +25,18 @@ jobs:
             container: "linuxmintd/mint20.2-amd64"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
-    container: ${{ matrix.container }}
+
+    # enable privileged mode for dpkg inside containers
+    container:
+      image: ${{ matrix.container }}
+      options: --privileged
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       ###########################################################
-      # Install APT dependencies per distro
+      # INSTALL DEPENDENCIES ON APT-BASED DISTROS
       ###########################################################
 
       - name: Install deps (Ubuntu host)
@@ -43,15 +45,16 @@ jobs:
           sudo apt update
           sudo apt install -y curl jq file gdebi-core apt-transport-https
 
-      - name: Install deps (APT distros)
+      - name: Install deps (APT container distros)
         if: matrix.container != ''
         run: |
           apt update
           apt install -y curl jq file gdebi-core apt-transport-https || true
 
       ###########################################################
-      # Download .deb package
+      # DOWNLOAD .deb PACKAGE
       ###########################################################
+
       - name: Download nxsbom-cli .deb package
         run: |
           mkdir -p cli_dir
@@ -60,23 +63,26 @@ jobs:
           ls -al cli_dir
 
       ###########################################################
-      # Install .deb package
+      # INSTALL THE .deb PACKAGE
       ###########################################################
-      - name: Install .deb
+
+      - name: Install .deb package
         run: |
           echo "Installing .deb on ${{ matrix.os }}"
           dpkg -i cli_dir/nxsbom-cli.deb || true
           apt --fix-broken install -y || true
+          dpkg -l | grep nxsbom || true
 
       ###########################################################
-      # Detect installed binary (nxsbom, not nxsbom-cli)
+      # DETECT INSTALLED BINARY (nxsbom)
       ###########################################################
+
       - name: Detect installed nxsbom binary
         run: |
           BIN=$(command -v nxsbom || true)
 
           if [ -z "$BIN" ]; then
-            echo "❌ ERROR: nxsbom binary not found after installation"
+            echo "❌ ERROR: nxsbom binary not found"
             ls -R /usr/local/bin || true
             ls -R /usr/bin || true
             exit 1
@@ -86,8 +92,9 @@ jobs:
           echo "BIN=$BIN" >> $GITHUB_ENV
 
       ###########################################################
-      # Run CLI Test
+      # RUN CLI TEST
       ###########################################################
+
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
