@@ -1,9 +1,16 @@
 name: Test nxsbom-cli (Multi-Distro Matrix)
 
 on:
+  workflow_dispatch:
+
   push:
-    branches: ["main"]
+    paths:
+      - ".github/workflows/main.yml"     # Run ONLY when THIS file changes
+      - "releases/**"                         # Optional: run when main files updated
+
   pull_request:
+    paths:
+      - ".github/workflows/main.yml"
 
 jobs:
   test-cli:
