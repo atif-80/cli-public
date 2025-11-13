@@ -1,13 +1,13 @@
 name: Test nxsbom-cli (.tar.gz) across 14 Linux distros
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/test-tar.yml"
   pull_request:
     paths:
       - ".github/workflows/test-tar.yml"
-  workflow_dispatch:
 
 jobs:
   test-tar:
@@ -52,34 +52,35 @@ jobs:
         uses: actions/checkout@v4
 
       ###########################################################
-      #  INSTALL REQUIRED SOFTWARE PER DISTRO
+      # INSTALL REQUIRED DEPS
       ###########################################################
 
       # Ubuntu host
-      - name: Install deps (Ubuntu host)
+      - name: Install deps (Ubuntu Host)
         if: matrix.container == ''
         run: |
           sudo apt update
           sudo apt install -y curl jq file tar gzip libstdc++6
 
       # Debian-based
-      - name: Install deps (Debian/Ubuntu/Kali/Zorin/Pop_OS/LinuxMint)
-        if: startsWith(matrix.os, 'debian') || startsWith(matrix.os, 'kali') || startsWith(matrix.os, 'zorin') || startsWith(matrix.os, 'popos') || startsWith(matrix.os, 'linuxmint')
+      - name: Install deps (Debian/Kali)
+        if: matrix.os == 'debian' || matrix.os == 'kali'
         run: |
           apt update
           apt install -y curl jq file tar gzip libstdc++6 || true
 
-      # Fedora & RPM Family
-      - name: Install deps (RPM distros)
+      # Fedora / RPM Distros
+      - name: Install deps (RPM Family)
         if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
         run: |
-          yum install -y curl jq file tar gzip libstdc++.so.6 || dnf install -y curl jq file tar gzip libstdc++.so.6 || true
+          (dnf install -y curl jq file tar gzip libstdc++ || true)
+          (yum install -y curl jq file tar gzip libstdc++ || true)
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
-          zypper refresh
+          zypper refresh || true
           zypper install -y curl jq file tar gzip libstdc++6 || true
 
       # Alpine
@@ -94,11 +95,11 @@ jobs:
         if: matrix.os == 'clearlinux'
         run: |
           swupd update || true
-          swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++ || true
+          swupd bundle-add curl jq os-core file-utils libstdc++ dev-utils || true
           ldconfig
 
       ###########################################################
-      #  DOWNLOAD .tar.gz PACKAGE
+      # DOWNLOAD TARGZ
       ###########################################################
       - name: Download nxsbom-cli tar.gz
         run: |
@@ -108,18 +109,18 @@ jobs:
           ls -al cli_dir
 
       ###########################################################
-      #  EXTRACT & INSTALL (AUTO-DETECT ELF)
+      # EXTRACT + FIND ELF
       ###########################################################
-      - name: Extract and install binary
+      - name: Extract and install
         run: |
           cd cli_dir
-          tar -xzf nxsbom-cli.tar.gz
+          tar -xzf nxsbom-cli.tar.gz || (echo "❌ tar extraction failed"; exit 1)
 
-          echo ">>> Listing extracted files:"
+          echo ">>> Listing extracted files"
           ls -R .
 
           echo ">>> Searching for ELF binary"
-          BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep ELF >/dev/null && echo "{}"' \; | head -n 1)
+          BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep -q ELF && echo "{}"' \; | head -n 1)
 
           if [ -z "$BINARY_FILE" ]; then
             echo "❌ ERROR: No ELF binary found"
@@ -128,15 +129,13 @@ jobs:
 
           echo "Found binary: $BINARY_FILE"
           chmod +x "$BINARY_FILE"
-
-          echo "Installing to /usr/local/bin/nxsbom-cli"
           cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
           ls -l /usr/local/bin/nxsbom-cli
 
       ###########################################################
-      #  RUN CLI TEST
+      # RUN TESTS
       ###########################################################
-      - name: Run CLI Test
+      - name: Run CLI Test (--help)
         run: |
           echo "Running on OS: ${{ matrix.os }}"
-          nxsbom-cli --version || nxsbom-cli -h || true
+          nxsbom-cli --help || nxsbom-cli -h || true
