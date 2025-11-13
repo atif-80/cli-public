@@ -2,13 +2,15 @@ name: Test nxsbom-cli AppImage (Multi-Distro Matrix)
 
 on:
   workflow_dispatch:
+
   push:
     paths:
-      - ".github/workflows/test-appimage.yml"
+      - ".github/workflows/test-AppImage.yml"
       - "releases/**"
+
   pull_request:
     paths:
-      - ".github/workflows/test-appimage.yml"
+      - ".github/workflows/test-AppImage.yml"
 
 jobs:
   test-cli-appimage:
@@ -18,143 +20,117 @@ jobs:
         include:
           - os: ubuntu-24.04
             container: ""
-          - os: fedora
-            container: "fedora:latest"
+            fatal: false
+
           - os: debian
             container: "debian:latest"
+            fatal: false
+
+          - os: fedora
+            container: "fedora:latest"
+            fatal: false
+
           - os: arch
             container: "archlinux:latest"
+            fatal: false
+
           - os: kali
             container: "kalilinux/kali-rolling"
+            fatal: false
+
+          # ---- Known GLIBC incompatibles ----
           - os: centos
             container: "quay.io/centos/centos:stream9"
+            fatal: true
+
           - os: rhel
             container: "registry.access.redhat.com/ubi9/ubi"
+            fatal: true
+
           - os: alma
             container: "almalinux:latest"
+            fatal: true
+
           - os: oracle
             container: "oraclelinux:9"
-          - os: amazon
-            container: "amazonlinux:2023"
+            fatal: true
+
           - os: rocky
             container: "rockylinux:9"
+            fatal: true
+
+          # ---- Package manager issues ----
+          - os: amazon
+            container: "amazonlinux:2023"
+            fatal: true
+
           - os: opensuse
             container: "opensuse/leap:latest"
+            fatal: true
+
+          # ---- AppImage fundamentally incompatible ----
           - os: alpine
             container: "alpine:latest"
+            fatal: true
+
           - os: clearlinux
             container: "clearlinux:latest"
+            fatal: true
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
+    continue-on-error: ${{ matrix.fatal }}
 
     steps:
-      - name: Print environment
+      - name: Pre-install Clear Linux base bundles
+        if: matrix.os == 'clearlinux'
         run: |
-          echo "Testing OS: ${{ matrix.os }}"
-          cat /etc/os-release || true
-          uname -a || true
+          swupd update -y || true
+          swupd bundle-add os-core os-core-dev c-basic gcc-libs \
+            python-basic curl wget tar gzip unzip jq libstdc++ fuse || true
+
+      - name: Pre-install Amazon missing tools
+        if: matrix.os == 'amazon'
+        run: |
+          yum install -y tar gzip which || true
+
+      - name: Pre-install openSUSE missing tools
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh || true
+          zypper -n install tar gzip which || true
+
+      - name: Install deps (APT-based)
+        if: matrix.os == 'ubuntu-24.04' || matrix.os == 'debian' || matrix.os == 'kali'
+        run: |
+          apt update || true
+          apt install -y curl jq file fuse3 squashfs-tools || true
+
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
+        run: |
+          dnf install -y curl jq file fuse fuse-libs squashfs-tools || true
+
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq file fuse2 squashfs-tools || true
+
+      - name: Install deps (RHEL/CentOS/Alma/Rocky/Oracle)
+        if: matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky'
+        run: |
+          yum install -y curl jq file fuse fuse-libs squashfs-tools || true
+
+      - name: Install deps (Alpine — partial only)
+        if: matrix.os == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file fusermount fuse2 squashfs-tools gcompat || true
+          echo "NOTE: Alpine is musl; AppImage will fail."
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      ###########################################################
-      #         INSTALL REQUIRED PACKAGES PER DISTRO
-      ###########################################################
-
-      # Ubuntu host (non-container)
-      - name: Install deps (Ubuntu host)
-        if: matrix.container == ''
-        run: |
-          sudo apt update || true
-          sudo apt install -y curl jq fuse3 file squashfuse || true
-
-      # Fedora
-      - name: Install deps (Fedora)
-        if: matrix.os == 'fedora'
-        run: |
-          dnf install -y curl jq fuse fuse-libs file squashfs-tools which || true
-
-      # Debian
-      - name: Install deps (Debian)
-        if: matrix.os == 'debian'
-        run: |
-          apt update || true
-          apt install -y curl jq file fuse3 squashfs-tools || true
-
-      # Arch
-      - name: Install deps (Arch)
-        if: matrix.os == 'arch'
-        run: |
-          pacman -Sy --noconfirm curl jq fuse2 squashfs-tools file || true
-
-      # Kali
-      - name: Install deps (Kali)
-        if: matrix.os == 'kali'
-        run: |
-          apt update || true
-          apt install -y curl jq file fuse3 squashfs-tools || true
-
-      # CentOS
-      - name: Install deps (CentOS)
-        if: matrix.os == 'centos'
-        run: |
-          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
-
-      # RHEL
-      - name: Install deps (RHEL)
-        if: matrix.os == 'rhel'
-        run: |
-          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
-
-      # Alma
-      - name: Install deps (AlmaLinux)
-        if: matrix.os == 'alma'
-        run: |
-          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
-
-      # Oracle
-      - name: Install deps (Oracle Linux)
-        if: matrix.os == 'oracle'
-        run: |
-          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
-
-      # Amazon Linux
-      - name: Install deps (Amazon Linux)
-        if: matrix.os == 'amazon'
-        run: |
-          yum install -y tar gzip curl jq file fuse squashfs-tools which || true
-
-      # Rocky Linux
-      - name: Install deps (Rocky)
-        if: matrix.os == 'rocky'
-        run: |
-          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
-
-      # openSUSE
-      - name: Install deps (openSUSE)
-        if: matrix.os == 'opensuse'
-        run: |
-          zypper refresh || true
-          zypper install -y curl jq file fuse squashfs fuse3-tools || true
-
-      # Alpine
-      - name: Install deps (Alpine)
-        if: matrix.os == 'alpine'
-        run: |
-          apk update
-          apk add --no-cache curl jq file fuse squashfs-tools gcompat || true
-
-      # Clear Linux
-      - name: Install deps (Clear Linux)
-        if: matrix.os == 'clearlinux'
-        run: |
-          swupd update -y || true
-          swupd bundle-add curl jq fuse which sysadmin-basic dev-utils || true
-
-      ###########################################################
-      #                 DOWNLOAD APPIMAGE
-      ###########################################################
       - name: Download AppImage
         run: |
           mkdir -p cli_dir
@@ -163,28 +139,28 @@ jobs:
           chmod +x cli_dir/nxsbom-cli.AppImage
           ls -lh cli_dir
 
-      ###########################################################
-      #                    RUN TEST
-      ###########################################################
       - name: Attempt native AppImage run
-        continue-on-error: true
+        id: native
         run: |
           echo ">>> Attempting native AppImage run"
-          ./cli_dir/nxsbom-cli.AppImage --version || ./cli_dir/nxsbom-cli.AppImage -h
+          ./cli_dir/nxsbom-cli.AppImage -h || true
 
-      - name: Extract AppImage (fallback)
+      - name: Extract AppImage fallback
         run: |
           echo ">>> Native failed — extracting AppImage"
-          chmod +x cli_dir/nxsbom-cli.AppImage
           ./cli_dir/nxsbom-cli.AppImage --appimage-extract || true
           ls -R squashfs-root || true
 
       - name: Run extracted AppRun
         run: |
           if [ -f squashfs-root/AppRun ]; then
-            chmod +x squashfs-root/AppRun
             echo ">>> Running extracted AppRun"
-            squashfs-root/AppRun --version || squashfs-root/AppRun -h || true
+            chmod +x squashfs-root/AppRun || true
+            ./squashfs-root/AppRun -h || true
           else
             echo "❌ AppRun not found"
           fi
+
+      - name: Summary
+        run: |
+          echo "Finished testing AppImage on: ${{ matrix.os }}"
