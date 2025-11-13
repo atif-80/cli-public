@@ -1,13 +1,13 @@
 name: Test nxsbom-cli (.tar.gz) across 14 Linux distros
 
 on:
-  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/test-tar.yml"
   pull_request:
     paths:
       - ".github/workflows/test-tar.yml"
+  workflow_dispatch:
 
 jobs:
   test-tar:
@@ -51,9 +51,9 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      ###########################################################
-      #  INSTALL REQUIRED SOFTWARE PER DISTRO
-      ###########################################################
+      ##############################################################
+      # INSTALL DEPENDENCIES
+      ##############################################################
 
       # Ubuntu host
       - name: Install deps (Ubuntu host)
@@ -62,33 +62,39 @@ jobs:
           sudo apt update
           sudo apt install -y curl jq file tar gzip libstdc++6
 
-      # Debian-based
-      - name: Install deps (Debian/Kali)
-        if: matrix.os == 'debian' || matrix.os == 'kali'
+      # Debian-based (Debian, Kali, Ubuntu containers)
+      - name: Install deps (Debian family)
+        if: matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'ubuntu-24.04'
         run: |
-          apt update
+          apt update || true
           apt install -y curl jq file tar gzip libstdc++6 || true
 
-      # RPM Distros Fix (FORCE INSTALL ALL REQUIRED TOOLS)
+      # Arch Linux
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq file tar gzip || true
+
+      # RPM-based (Fedora, CentOS, RHEL, Alma, Oracle, Rocky, Amazon)
       - name: Install deps (RPM distros)
         if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
         run: |
-          yum install -y curl jq file findutils tar gzip libstdc++ || true
-          dnf install -y curl jq file findutils tar gzip libstdc++ || true
+          dnf install -y curl jq tar gzip file libstdc++.so.6 || \
+          yum install -y curl jq tar gzip file libstdc++.so.6 || true
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh || true
-          zypper install -y curl jq file tar gzip libstdc++6 findutils || true
+          zypper install -y curl jq file tar gzip libstdc++6 || true
 
-      # Alpine
+      # Alpine (musl)
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat findutils || true
+          apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat || true
 
       # Clear Linux
       - name: Install deps (Clear Linux)
@@ -98,9 +104,9 @@ jobs:
           swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++ || true
           ldconfig
 
-      ###########################################################
-      #  DOWNLOAD TARGZ
-      ###########################################################
+      ##############################################################
+      # DOWNLOAD .tar.gz
+      ##############################################################
       - name: Download nxsbom-cli tar.gz
         run: |
           mkdir -p cli_dir
@@ -108,10 +114,10 @@ jobs:
             -o cli_dir/nxsbom-cli.tar.gz
           ls -al cli_dir
 
-      ###########################################################
-      #  EXTRACT & INSTALL
-      ###########################################################
-      - name: Extract and install
+      ##############################################################
+      # EXTRACTION & BINARY INSTALL
+      ##############################################################
+      - name: Extract and install binary
         run: |
           cd cli_dir
           tar -xzf nxsbom-cli.tar.gz
@@ -119,23 +125,24 @@ jobs:
           echo ">>> Listing extracted files"
           ls -R .
 
-          echo ">>> Searching for ELF binary"
+          echo ">>> Searching for ELF binary using file command"
           BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep -q ELF && echo "{}"' \; | head -n 1)
 
           if [ -z "$BINARY_FILE" ]; then
-            echo "❌ ERROR: No ELF binary found"
+            echo "❌ ERROR: ELF binary not found, but deps installed — this should not happen"
             exit 1
           fi
 
-          echo "Found binary: $BINARY_FILE"
+          echo "Found ELF: $BINARY_FILE"
           chmod +x "$BINARY_FILE"
+
           cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
           ls -l /usr/local/bin/nxsbom-cli
 
-      ###########################################################
-      #  RUN CLI TEST
-      ###########################################################
-      - name: Run CLI Test (--help)
+      ##############################################################
+      # RUN TEST (SHOW GLIBC ERROR OR --HELP)
+      ##############################################################
+      - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
-          nxsbom-cli --help || nxsbom-cli -h || true
+          nxsbom-cli --help || nxsbom-cli --version || true
