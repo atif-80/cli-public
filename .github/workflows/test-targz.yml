@@ -166,19 +166,35 @@ jobs:
           ls -al cli_dir
 
       ###########################################################
-      #               EXTRACT & INSTALL BINARY
+      #               EXTRACT & INSTALL BINARY (FIXED)
       ###########################################################
       - name: Extract .tar.gz
         run: |
           cd cli_dir
           tar -xzf nxsbom-cli.tar.gz
-          # Find the binary inside (standard naming expected)
-          BINARY_FILE=$(find . -type f -name "nxsbom-cli" | head -n 1)
-          echo "Binary found: $BINARY_FILE"
+
+          echo ">>> Listing extracted files:"
+          ls -R .
+
+          echo ">>> Searching for binary inside extracted files..."
+          # Find ANY ELF binary inside the extracted tar.gz
+          BINARY_FILE=$(find . -type f -exec sh -c 'file -b "{}" | grep -q ELF && echo "{}"' \; | head -n 1)
+
+          if [ -z "$BINARY_FILE" ]; then
+            echo "❌ ERROR: No ELF binary found inside tar.gz"
+            exit 1
+          fi
+
+          echo "Binary detected: $BINARY_FILE"
+
           chmod +x "$BINARY_FILE"
+
+          echo ">>> Installing binary to /usr/local/bin/nxsbom-cli"
           mkdir -p /usr/local/bin
           cp "$BINARY_FILE" /usr/local/bin/nxsbom-cli
+
           ls -l /usr/local/bin/nxsbom-cli
+
 
       ###########################################################
       #                     RUN TEST
