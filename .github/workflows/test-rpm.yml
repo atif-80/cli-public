@@ -1,9 +1,16 @@
 name: Test nxsbom-cli (.rpm) on RPM-based distros
 
 on:
+  workflow_dispatch:
+
   push:
-    branches: ["main"]
+    paths:
+      - ".github/workflows/test-rpm.yml"     # Run ONLY when THIS file changes
+      - "releases/**"                         # Optional: run when deb files updated
+
   pull_request:
+    paths:
+      - ".github/workflows/test-rpm.yml"
 
 jobs:
   test-rpm:
