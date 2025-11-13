@@ -1,9 +1,17 @@
 name: Test nxsbom-cli AppImage (Multi-Distro Matrix)
 
 on:
+  workflow_dispatch:
+
   push:
-    branches: ["main"]
+    paths:
+      - ".github/workflows/test-AppImage.yml"     # Run only when THIS file changes
+      - "releases/**"                             # (Optional) Run if AppImage files updated
+      - "scripts/**"                              # (Optional) If build scripts change
+
   pull_request:
+    paths:
+      - ".github/workflows/test-AppImage.yml"
 
 jobs:
   test-cli-appimage:
@@ -84,7 +92,7 @@ jobs:
           apt update
           apt install -y curl jq file fuse3 || true
 
-      # CentOS Stream
+      # CentOS
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
         run: |
@@ -109,7 +117,7 @@ jobs:
           yum install -y curl jq file fuse fuse-libs || true
 
       # Amazon Linux 2023
-      - name: Install deps (Amazon Linux)
+      - name: Install deps (Amazon)
         if: matrix.os == 'amazon'
         run: |
           yum install -y curl jq file fuse fuse-libs || true
@@ -127,17 +135,16 @@ jobs:
           zypper refresh
           zypper install -y curl jq file fuse libfuse2 || true
 
-      # Alpine (special handling)
+      # Alpine
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
           apk add --no-cache curl jq file fuse2 fuse libgcc libstdc++ gcompat || true
-          # Enable fuse
           mkdir -p /dev/fuse || true
           mknod -m 666 /dev/fuse c 10 229 || true
 
-      # Clear Linux (special handling)
+      # Clear Linux
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
