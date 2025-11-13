@@ -48,6 +48,20 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
+
+      #############################################
+      # FIX checkout tar missing for openSUSE & amazon
+      #############################################
+      - name: Pre-install tar for container (fix checkout)
+        if: ${{ matrix.os == 'opensuse' || matrix.os == 'amazon' }}
+        run: |
+          if command -v zypper >/dev/null; then
+            zypper refresh || true
+            zypper install -y tar gzip || true
+          elif command -v yum >/dev/null; then
+            yum install -y tar gzip || true
+          fi
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -55,79 +69,76 @@ jobs:
         run: |
           echo "Matrix OS: ${{ matrix.os }}"
           cat /etc/os-release || true
-          which file || echo "file missing"
 
-      ###################################################################
-      # Install Dependencies Per Distro
-      ###################################################################
+      ###########################################################
+      # INSTALL DEPS
+      ###########################################################
 
-      - name: Install deps (Ubuntu host)
+      - name: Ubuntu Host deps
         if: ${{ matrix.container == '' }}
         run: |
           sudo apt update -y
           sudo apt install -y curl jq file tar gzip libstdc++6
 
-      - name: Install deps (Debian-family)
+      - name: Debian-family deps
         if: ${{ matrix.os == 'debian' || matrix.os == 'kali' }}
         run: |
-          apt update -y || true
+          apt update -y
           apt install -y curl jq file tar gzip libstdc++6 || true
 
-      - name: Install deps (Arch)
+      - name: Arch deps
         if: ${{ matrix.os == 'arch' }}
         run: |
-          pacman -Sy --noconfirm curl jq file tar gzip libstdc++
+          pacman -Sy --noconfirm curl jq file tar gzip gcc-libs
 
-      - name: Install deps (openSUSE)
+      - name: openSUSE deps
         if: ${{ matrix.os == 'opensuse' }}
         run: |
-          zypper refresh || true
+          zypper refresh
           zypper install -y curl jq file tar gzip libstdc++6 || true
 
-      - name: Install deps (Alpine)
+      - name: Alpine deps
         if: ${{ matrix.os == 'alpine' }}
         run: |
           apk update
           apk add --no-cache curl jq file tar gzip libgcc libstdc++ gcompat
 
-      - name: Install deps (Clear Linux)
+      - name: ClearLinux deps
         if: ${{ matrix.os == 'clearlinux' }}
         run: |
           swupd bundle-add os-core file-utils curl jq c-basic dev-utils libstdc++
 
-      - name: Install deps (RPM-based)
+      - name: RPM deps
         if: ${{ matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel'
-              || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky'
-              || matrix.os == 'amazon' }}
+             || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky'
+             || matrix.os == 'amazon' }}
         run: |
-          (dnf -y install curl jq tar gzip file file-libs which || true)
-          (yum -y install curl jq tar gzip file file-libs which || true)
-          echo "file exists? => $(which file || echo NO)"
+          (dnf install -y curl jq tar gzip file file-libs which || true)
+          (yum install -y curl jq tar gzip file file-libs which || true)
+          which file || echo "file missing"
 
-      ###################################################################
-      # Download tar.gz
-      ###################################################################
-      - name: Download nxsbom-cli tar.gz
+      ###########################################################
+      # DOWNLOAD
+      ###########################################################
+      - name: Download tar.gz
         run: |
           mkdir -p cli_dir
-          curl -L \
-            "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-glibc-x86_64.tar.gz" \
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-glibc-x86_64.tar.gz" \
             -o cli_dir/nxsbom-cli.tar.gz
           ls -al cli_dir
 
-      ###################################################################
-      # Extract and detect ELF binary
-      ###################################################################
+      ###########################################################
+      # EXTRACT
+      ###########################################################
       - name: Extract and install binary
         run: |
           cd cli_dir
           tar -xzf nxsbom-cli.tar.gz
 
-          echo ">>> Searching for ELF binary"
+          echo ">>> Detecting ELF binary"
           if command -v file >/dev/null; then
             BINARY=$(find . -type f -exec sh -c 'file -b "$1" | grep ELF >/dev/null && echo "$1"' _ {} \; | head -n 1)
           else
-            echo "file command missing → fallback ELF detection"
             BINARY=$(find . -type f -exec sh -c 'head -c4 "$1" | grep -q "$(printf "\x7FELF")" && echo "$1"' _ {} \; | head -n 1)
           fi
 
@@ -136,15 +147,14 @@ jobs:
             exit 1
           fi
 
-          echo "Found ELF binary: $BINARY"
+          echo "Found ELF: $BINARY"
           chmod +x "$BINARY"
           cp "$BINARY" /usr/local/bin/nxsbom-cli
 
-      ###################################################################
-      # Run CLI test
-      ###################################################################
+      ###########################################################
+      # RUN --help
+      ###########################################################
       - name: Run CLI Test
         run: |
-          echo "Running on OS: ${{ matrix.os }}"
+          echo "Running on ${{ matrix.os }}"
           nxsbom-cli --help || nxsbom-cli --version || true
-
