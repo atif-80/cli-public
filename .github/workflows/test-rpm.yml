@@ -5,8 +5,7 @@ on:
 
   push:
     paths:
-      - ".github/workflows/test-rpm.yml"     # Run ONLY when THIS file changes
-      - "releases/**"                         # Optional: run when deb files updated
+      - ".github/workflows/test-rpm.yml"
 
   pull_request:
     paths:
@@ -21,177 +20,84 @@ jobs:
           - distro: fedora
             container: "fedora:latest"
             pkgmgr: dnf
+
           - distro: centos
             container: "quay.io/centos/centos:stream9"
             pkgmgr: yum
+
           - distro: rhel
             container: "registry.access.redhat.com/ubi9/ubi"
             pkgmgr: yum
+
           - distro: alma
             container: "almalinux:latest"
             pkgmgr: yum
-          - distro: oracle
-            container: "oraclelinux:9"
-            pkgmgr: yum
-          - distro: amazon
-            container: "amazonlinux:2023"
-            pkgmgr: yum
+
           - distro: rocky
             container: "rockylinux:9"
             pkgmgr: yum
+
+          - distro: oracle
+            container: "oraclelinux:9"
+            pkgmgr: yum
+
+          - distro: amazon
+            container: "amazonlinux:2023"
+            pkgmgr: yum
+
           - distro: opensuse
             container: "opensuse/leap:latest"
             pkgmgr: zypper
 
-    # run on Ubuntu host only when container is empty; here every entry provides a container
     runs-on: ubuntu-24.04
     container: ${{ matrix.container }}
 
     steps:
+      - name: Install base tools
+        run: |
+          echo ">>> Installing required system tools"
+          (yum install -y tar gzip file curl jq libstdc++.so.6 which || true)
+          (dnf install -y tar gzip file curl jq libstdc++.so.6 which || true)
+          (zypper -n install tar gzip file curl jq libstdc++6 which || true)
+          ldconfig || true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Print environment
-        run: |
-          echo "Distro: ${{ matrix.distro }}"
-          cat /etc/os-release || true
-          uname -a
-
-      ##################################################################
-      # Install per-distro dependencies (curl, jq, file, tools needed)
-      ##################################################################
-
-      - name: Install deps (Fedora)
-        if: matrix.distro == 'fedora'
-        run: |
-          dnf -y update || true
-          dnf -y install curl jq file which unzip gzip tar || true
-
-      - name: Install deps (CentOS Stream)
-        if: matrix.distro == 'centos'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (RHEL UBI)
-        if: matrix.distro == 'rhel'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (AlmaLinux)
-        if: matrix.distro == 'alma'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (Oracle Linux)
-        if: matrix.distro == 'oracle'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (Amazon Linux 2023)
-        if: matrix.distro == 'amazon'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (Rocky)
-        if: matrix.distro == 'rocky'
-        run: |
-          yum -y update || true
-          yum -y install -y curl jq file which unzip gzip tar || true
-
-      - name: Install deps (openSUSE)
-        if: matrix.distro == 'opensuse'
-        run: |
-          zypper refresh || true
-          zypper -n install curl jq file which gzip tar unzip || true
-
-      ##################################################################
-      # Download .rpm
-      ##################################################################
-      - name: Download nxsbom-cli .rpm
+      - name: Download RPM
         run: |
           mkdir -p cli_dir
-          echo "Downloading RPM from release v1.0"
-          curl -L -f "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-e594b4d_dev-1.x86_64.rpm" -o cli_dir/nxsbom-cli.rpm
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-e594b4d_dev-1.x86_64.rpm" \
+            -o cli_dir/nxsbom-cli.rpm
           ls -lh cli_dir
 
-      ##################################################################
-      # Install RPM (prefer native package manager)
-      ##################################################################
-      - name: Install .rpm package (dnf)
-        if: matrix.pkgmgr == 'dnf'
+      - name: Install RPM
         run: |
-          set -e
-          echo "Installing via dnf: cli_dir/nxsbom-cli.rpm"
-          dnf -y localinstall ./cli_dir/nxsbom-cli.rpm || dnf -y install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-          echo "Installed files:"
-          which nxsbom-cli || true
-          ls -l /usr/local/bin /usr/bin /opt || true
+          if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
+            dnf install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
+          elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
+            yum install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
+          elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
+            zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
+          fi
 
-      - name: Install .rpm package (yum)
-        if: matrix.pkgmgr == 'yum'
-        run: |
-          set -e
-          echo "Installing via yum: cli_dir/nxsbom-cli.rpm"
-          yum -y install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-          echo "Installed files:"
-          which nxsbom-cli || true
-          ls -l /usr/local/bin /usr/bin /opt || true
+          echo ">>> Installed files:"
+          rpm -ql nxsbom-cli-e594b4d_dev-1.x86_64 || rpm -qlp cli_dir/nxsbom-cli.rpm
 
-      - name: Install .rpm package (zypper)
-        if: matrix.pkgmgr == 'zypper'
+      - name: Locate installed binary
+        id: locate
         run: |
-          set -e
-          echo "Installing via zypper: cli_dir/nxsbom-cli.rpm"
-          zypper --non-interactive install --no-recommends ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-          echo "Installed files:"
-          which nxsbom-cli || true
-          ls -l /usr/local/bin /usr/bin /opt || true
+          BIN=$(command -v nxsbom || true)
 
-      ##################################################################
-      # Verify installation and run smoke tests
-      ##################################################################
-      - name: Verify nxsbom-cli binary
-        run: |
-          echo "PATH: $PATH"
-          if command -v nxsbom-cli >/dev/null 2>&1; then
-            echo "nxsbom-cli found at: $(command -v nxsbom-cli)"
-            nxsbom-cli --version || nxsbom-cli -h
-            echo "smoke test: nxsbom-cli -h run completed"
-          else
-            echo "nxsbom-cli not in PATH; try /usr/local/bin or /usr/bin"
-            ls -l /usr/local/bin/nxsbom-cli /usr/bin/nxsbom-cli /opt/nxsbom* || true
-            echo "Attempt running downloaded binary directly as fallback"
-            if [ -f "./cli_dir/nxsbom-cli.rpm" ]; then
-              echo "RPM exists; listing rpm contents"
-              rpm -qlp ./cli_dir/nxsbom-cli.rpm || true
-            fi
+          if [ -z "$BIN" ]; then
+            echo "❌ ERROR: 'nxsbom' binary not found in PATH"
             exit 1
           fi
 
-      - name: Quick functional smoke (help + exit)
-        run: |
-          nxsbom-cli -h || nxsbom-cli --version || true
+          echo "Binary found at: $BIN"
+          echo "BIN=$BIN" >> $GITHUB_ENV
 
-      ##################################################################
-      # Cleanup (best-effort)
-      ##################################################################
-      - name: Cleanup installed package (best-effort)
+      - name: Run smoke test
         run: |
-          set +e
-          if command -v rpm >/dev/null 2>&1; then
-            PKGNAME=$(rpm -qf $(command -v nxsbom-cli) 2>/dev/null || true)
-            if [ -n "$PKGNAME" ]; then
-              echo "Removing package: $PKGNAME"
-              if [ "${{ matrix.pkgmgr }}" = "dnf" ] || [ "${{ matrix.pkgmgr }}" = "yum" ]; then
-                ${ { matrix.pkgmgr } } -y remove "$PKGNAME" || rpm -e "$PKGNAME" || true
-              else
-                rpm -e "$PKGNAME" || true
-              fi
-            fi
-          fi
-          echo "Done cleanup (best-effort)."
+          echo "Running smoke test:"
+          $BIN --version || $BIN -h || true
