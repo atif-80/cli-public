@@ -53,53 +53,127 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      - name: Install base tools
+      ##########################################################
+      # Fix Amazon Linux & openSUSE BEFORE checkout
+      # (tar missing → GitHub checkout fails)
+      ##########################################################
+      - name: Pre-install tar for Amazon & openSUSE BEFORE checkout
+        if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
         run: |
-          echo ">>> Installing required system tools"
-          (yum install -y tar gzip file curl jq libstdc++.so.6 which || true)
-          (dnf install -y tar gzip file curl jq libstdc++.so.6 which || true)
-          (zypper -n install tar gzip file curl jq libstdc++6 which || true)
-          ldconfig || true
-          yum install -y tar gzip
-          zypper install -y tar gzip
+          echo ">>> Pre-installing tar, gzip for ${ { matrix.distro } }"
+          (yum install -y tar gzip || true)
+          (dnf install -y tar gzip || true)
+          (zypper -n install tar gzip || true)
 
+      ##########################################################
+      # Checkout repo
+      ##########################################################
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download RPM
+      - name: Print environment
+        run: |
+          echo "Distro: ${{ matrix.distro }}"
+          cat /etc/os-release || true
+          uname -a
+
+      ##########################################################
+      # Install required dependencies per distro
+      ##########################################################
+      - name: Install deps (Fedora)
+        if: matrix.distro == 'fedora'
+        run: |
+          dnf -y update || true
+          dnf -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (CentOS Stream)
+        if: matrix.distro == 'centos'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (RHEL UBI)
+        if: matrix.distro == 'rhel'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (AlmaLinux)
+        if: matrix.distro == 'alma'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (Rocky)
+        if: matrix.distro == 'rocky'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (Oracle Linux)
+        if: matrix.distro == 'oracle'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (Amazon Linux)
+        if: matrix.distro == 'amazon'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+
+      - name: Install deps (openSUSE)
+        if: matrix.distro == 'opensuse'
+        run: |
+          zypper refresh || true
+          zypper -n install curl jq file which gzip tar unzip libstdc++6 || true
+
+      ##########################################################
+      # Download RPM
+      ##########################################################
+      - name: Download nxsbom-cli RPM
         run: |
           mkdir -p cli_dir
           curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-e594b4d_dev-1.x86_64.rpm" \
             -o cli_dir/nxsbom-cli.rpm
           ls -lh cli_dir
 
-      - name: Install RPM
+      ##########################################################
+      # Install RPM using correct package manager
+      ##########################################################
+      - name: Install RPM (dnf)
+        if: matrix.pkgmgr == 'dnf'
         run: |
-          if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
-            dnf install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
-          elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
-            yum install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
-          elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
-            zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm
-          fi
+          dnf install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
 
-          echo ">>> Installed files:"
-          rpm -ql nxsbom-cli-e594b4d_dev-1.x86_64 || rpm -qlp cli_dir/nxsbom-cli.rpm
+      - name: Install RPM (yum)
+        if: matrix.pkgmgr == 'yum'
+        run: |
+          yum install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
 
+      - name: Install RPM (zypper)
+        if: matrix.pkgmgr == 'zypper'
+        run: |
+          zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
+
+      ##########################################################
+      # Locate binary (installed as "nxsbom")
+      ##########################################################
       - name: Locate installed binary
-        id: locate
         run: |
           BIN=$(command -v nxsbom || true)
-
+          echo "Found: $BIN"
           if [ -z "$BIN" ]; then
-            echo "❌ ERROR: 'nxsbom' binary not found in PATH"
+            echo "❌ Binary not found (expected for non-Fedora due to GLIBC issue)"
             exit 1
           fi
-
-          echo "Binary found at: $BIN"
           echo "BIN=$BIN" >> $GITHUB_ENV
 
-      - name: Run smoke test
+      ##########################################################
+      # Run smoke test
+      ##########################################################
+      - name: Run nxsbom smoke test
         run: |
-          echo "Running smoke test:"
+          echo "Testing nxsbom..."
           $BIN --version || $BIN -h || true
+
