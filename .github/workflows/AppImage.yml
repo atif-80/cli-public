@@ -4,10 +4,11 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - ".github/workflows/test-AppImage.yml"
+      - ".github/workflows/test-appimage.yml"
+      - "releases/**"
   pull_request:
     paths:
-      - ".github/workflows/test-AppImage.yml"
+      - ".github/workflows/test-appimage.yml"
 
 jobs:
   test-cli-appimage:
@@ -45,120 +46,145 @@ jobs:
             container: "clearlinux:latest"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
-
-    container:
-      image: ${{ matrix.container }}
-      options: --privileged
+    container: ${{ matrix.container }}
 
     steps:
-      - name: PRE-FIX for Amazon/openSUSE (tar missing)
-        if: matrix.os == 'amazon' || matrix.os == 'opensuse'
+      - name: Print environment
         run: |
-          mkdir -p /bin || true
-          which tar || ln -s /usr/bin/gtar /bin/tar || true
-          which tar || true
+          echo "Testing OS: ${{ matrix.os }}"
+          cat /etc/os-release || true
+          uname -a || true
 
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      ######################################################################
-      # INSTALL DEPENDENCIES PER DISTRO
-      ######################################################################
+      ###########################################################
+      #         INSTALL REQUIRED PACKAGES PER DISTRO
+      ###########################################################
 
+      # Ubuntu host (non-container)
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
-          sudo apt update
-          sudo apt install -y curl jq file fuse3 libfuse3-3 || true
+          sudo apt update || true
+          sudo apt install -y curl jq fuse3 file squashfuse || true
 
-      - name: Install deps (Debian/Kali)
-        if: matrix.os == 'debian' || matrix.os == 'kali'
-        run: |
-          apt update || true
-          apt install -y curl jq file fuse3 libfuse3-3 || true
-
-      - name: Install deps (Arch)
-        if: matrix.os == 'arch'
-        run: |
-          pacman -Sy --noconfirm curl jq file fuse3 || true
-
+      # Fedora
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
         run: |
-          dnf install -y curl jq file fuse fuse-libs fuse3 fuse3-libs || true
+          dnf install -y curl jq fuse fuse-libs file squashfs-tools which || true
 
-      - name: Install deps (CentOS/RHEL/Alma/Rocky/Oracle)
-        if: matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle'
+      # Debian
+      - name: Install deps (Debian)
+        if: matrix.os == 'debian'
         run: |
-          yum install -y curl jq file fuse fuse-libs fuse3 fuse3-libs || true
+          apt update || true
+          apt install -y curl jq file fuse3 squashfs-tools || true
 
-      - name: Install deps (Amazon)
+      # Arch
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq fuse2 squashfs-tools file || true
+
+      # Kali
+      - name: Install deps (Kali)
+        if: matrix.os == 'kali'
+        run: |
+          apt update || true
+          apt install -y curl jq file fuse3 squashfs-tools || true
+
+      # CentOS
+      - name: Install deps (CentOS)
+        if: matrix.os == 'centos'
+        run: |
+          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
+
+      # RHEL
+      - name: Install deps (RHEL)
+        if: matrix.os == 'rhel'
+        run: |
+          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
+
+      # Alma
+      - name: Install deps (AlmaLinux)
+        if: matrix.os == 'alma'
+        run: |
+          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
+
+      # Oracle
+      - name: Install deps (Oracle Linux)
+        if: matrix.os == 'oracle'
+        run: |
+          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
+
+      # Amazon Linux
+      - name: Install deps (Amazon Linux)
         if: matrix.os == 'amazon'
         run: |
-          yum install -y curl jq file fuse fuse-libs tar gzip || true
+          yum install -y tar gzip curl jq file fuse squashfs-tools which || true
 
+      # Rocky Linux
+      - name: Install deps (Rocky)
+        if: matrix.os == 'rocky'
+        run: |
+          yum install -y curl jq fuse fuse-libs file squashfs-tools || true
+
+      # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh || true
-          zypper install -y curl jq file fuse fuse2 fuse3 gzip tar || true
+          zypper install -y curl jq file fuse squashfs fuse3-tools || true
 
+      # Alpine
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq file fuse fuse3 fuse-common gcompat libstdc++ || true
-          mknod -m 666 /dev/fuse c 10 229 || true
+          apk add --no-cache curl jq file fuse squashfs-tools gcompat || true
 
+      # Clear Linux
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update -y || true
-          swupd bundle-add os-core fuse curl jq file gzip tar libstdc++ || true
+          swupd bundle-add curl jq fuse which sysadmin-basic dev-utils || true
 
-      ######################################################################
-      # DOWNLOAD APPIMAGE
-      ######################################################################
+      ###########################################################
+      #                 DOWNLOAD APPIMAGE
+      ###########################################################
       - name: Download AppImage
         run: |
           mkdir -p cli_dir
           curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-x86_64.AppImage" \
             -o cli_dir/nxsbom-cli.AppImage
           chmod +x cli_dir/nxsbom-cli.AppImage
+          ls -lh cli_dir
 
-      ######################################################################
-      # LAYER 1 — NATIVE APPIMAGE RUN
-      ######################################################################
-      - name: Run AppImage (native mode)
-        id: run_native
+      ###########################################################
+      #                    RUN TEST
+      ###########################################################
+      - name: Attempt native AppImage run
         continue-on-error: true
         run: |
           echo ">>> Attempting native AppImage run"
           ./cli_dir/nxsbom-cli.AppImage --version || ./cli_dir/nxsbom-cli.AppImage -h
 
-      ######################################################################
-      # LAYER 2 — EXTRACT APPIMAGE
-      ######################################################################
-      - name: Extract AppImage
-        if: steps.run_native.outcome == 'failure'
-        continue-on-error: true
+      - name: Extract AppImage (fallback)
         run: |
           echo ">>> Native failed — extracting AppImage"
+          chmod +x cli_dir/nxsbom-cli.AppImage
           ./cli_dir/nxsbom-cli.AppImage --appimage-extract || true
           ls -R squashfs-root || true
-          chmod +x squashfs-root/AppRun || true
 
-      ######################################################################
-      # LAYER 3 — RUN `AppRun` DIRECTLY
-      ######################################################################
-      - name: Run AppRun (fallback)
-        if: steps.run_native.outcome == 'failure'
-        continue-on-error: true
+      - name: Run extracted AppRun
         run: |
           if [ -f squashfs-root/AppRun ]; then
+            chmod +x squashfs-root/AppRun
             echo ">>> Running extracted AppRun"
             squashfs-root/AppRun --version || squashfs-root/AppRun -h || true
           else
             echo "❌ AppRun not found"
           fi
-
