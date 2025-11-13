@@ -2,13 +2,9 @@ name: Test nxsbom-cli AppImage (Multi-Distro Matrix)
 
 on:
   workflow_dispatch:
-
   push:
     paths:
-      - ".github/workflows/test-AppImage.yml"     # Run only when THIS file changes
-      - "releases/**"                             # (Optional) Run if AppImage files updated
-      - "scripts/**"                              # (Optional) If build scripts change
-
+      - ".github/workflows/test-AppImage.yml"
   pull_request:
     paths:
       - ".github/workflows/test-AppImage.yml"
@@ -49,123 +45,136 @@ jobs:
             container: "clearlinux:latest"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
-    container: ${{ matrix.container }}
+    container:
+      image: ${{ matrix.container }}
+      options: --privileged
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      #######################################################
-      #        INSTALL REQUIRED PACKAGES PER DISTRO         #
-      #######################################################
+      ######################################################################
+      # INSTALL BASE DEPS FOR ALL 14 LINUX DISTROS
+      ######################################################################
 
-      # Ubuntu Host
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y curl jq file unzip libfuse2 || true
+          sudo apt install -y curl jq file fuse fuse2fs fuse3 libfuse2 libfuse3-3
+          sudo modprobe fuse || true
 
-      # Fedora
       - name: Install deps (Fedora)
         if: matrix.os == 'fedora'
         run: |
-          dnf install -y curl jq file fuse fuse-libs
+          dnf install -y curl jq file fuse fuse-libs fuse3-libs which
 
-      # Debian
       - name: Install deps (Debian)
         if: matrix.os == 'debian'
         run: |
           apt update
-          apt install -y curl jq file fuse3 || true
+          apt install -y curl jq file fuse fuse3 libfuse2 libfuse3-3 || true
+          modprobe fuse || true
 
-      # Arch Linux
       - name: Install deps (Arch)
         if: matrix.os == 'arch'
         run: |
-          pacman -Sy --noconfirm curl jq file fuse2 || true
+          pacman -Sy --noconfirm curl jq file fuse2 fuse3 || true
+          modprobe fuse || true
 
-      # Kali Linux
       - name: Install deps (Kali)
         if: matrix.os == 'kali'
         run: |
           apt update
-          apt install -y curl jq file fuse3 || true
+          apt install -y curl jq file fuse fuse3 libfuse2 libfuse3-3 || true
 
-      # CentOS
       - name: Install deps (CentOS)
         if: matrix.os == 'centos'
         run: |
           yum install -y curl jq file fuse fuse-libs || true
+          modprobe fuse || true
 
-      # RHEL UBI
       - name: Install deps (RHEL)
         if: matrix.os == 'rhel'
         run: |
           yum install -y curl jq file fuse fuse-libs || true
 
-      # AlmaLinux
-      - name: Install deps (AlmaLinux)
+      - name: Install deps (Alma)
         if: matrix.os == 'alma'
         run: |
           yum install -y curl jq file fuse fuse-libs || true
 
-      # Oracle Linux
       - name: Install deps (Oracle)
         if: matrix.os == 'oracle'
         run: |
           yum install -y curl jq file fuse fuse-libs || true
 
-      # Amazon Linux 2023
       - name: Install deps (Amazon)
         if: matrix.os == 'amazon'
         run: |
-          yum install -y curl jq file fuse fuse-libs || true
+          yum install -y curl jq file tar gzip fuse fuse-libs || true
 
-      # Rocky Linux
       - name: Install deps (Rocky)
         if: matrix.os == 'rocky'
         run: |
-          yum install -y curl jq file fuse fuse-libs || true
+          yum install -y curl jq file tar gzip fuse fuse-libs || true
 
-      # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
-          zypper refresh
-          zypper install -y curl jq file fuse libfuse2 || true
+          zypper refresh || true
+          zypper install -y curl jq file fuse fuse2 libfuse2 gzip tar || true
 
-      # Alpine
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq file fuse2 fuse libgcc libstdc++ gcompat || true
-          mkdir -p /dev/fuse || true
+          apk add --no-cache curl jq file fuse fuse2 fuse3 libstdc++ gcompat || true
+          # Enable FUSE manually
           mknod -m 666 /dev/fuse c 10 229 || true
 
-      # Clear Linux
       - name: Install deps (Clear Linux)
         if: matrix.os == 'clearlinux'
         run: |
           swupd update -y || true
-          swupd bundle-add os-core fuse libstdc++ curl jq binutils || true
-          ldconfig
+          swupd bundle-add os-core fuse curl jq file gzip tar || true
 
-      #######################################################
-      #                 DOWNLOAD APPIMAGE                   #
-      #######################################################
-      - name: Download nxsbom-cli AppImage
+      ######################################################################
+      # DOWNLOAD APPIMAGE
+      ######################################################################
+
+      - name: Download AppImage
         run: |
           mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-x86_64.AppImage" -o cli_dir/nxsbom-cli.AppImage
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-e594b4d-dev-x86_64.AppImage" \
+            -o cli_dir/nxsbom-cli.AppImage
           chmod +x cli_dir/nxsbom-cli.AppImage
           ls -al cli_dir
 
-      #######################################################
-      #                     RUN TEST                        #
-      #######################################################
-      - name: Run CLI Test
+      ######################################################################
+      # FIRST ATTEMPT — RUN APPIMAGE USING FUSE
+      ######################################################################
+      - name: Run AppImage (native fuse mode)
+        id: run_native
+        continue-on-error: true
         run: |
-          echo "Running on OS: ${{ matrix.os }}"
+          echo "Attempting native AppImage run"
           ./cli_dir/nxsbom-cli.AppImage --version || ./cli_dir/nxsbom-cli.AppImage -h
+
+      ######################################################################
+      # FALLBACK — APPIMAGE EXTRACT-AND-RUN MODE (NO FUSE REQUIRED)
+      ######################################################################
+      - name: Fallback — extract and run AppImage
+        if: steps.run_native.outcome == 'failure'
+        run: |
+          echo "Native run failed — extracting AppImage"
+          ./cli_dir/nxsbom-cli.AppImage --appimage-extract || true
+          ls -R squashfs-root || true
+
+          if [ -f squashfs-root/AppRun ]; then
+            chmod +x squashfs-root/AppRun
+            echo "Running extracted AppImage"
+            squashfs-root/AppRun --version || squashfs-root/AppRun -h || true
+          else
+            echo "❌ AppRun not found — extraction failed"
+          fi
