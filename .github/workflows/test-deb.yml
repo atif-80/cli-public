@@ -1,17 +1,15 @@
-name: Test nxsbom-cli (.deb package across 14 Linux distros)
+name: Test nxsbom-cli (.deb package on APT-based distros)
 
 on:
   workflow_dispatch:
 
   push:
     paths:
-      - ".github/workflows/test-deb.yml"     # Run ONLY when THIS file changes
-      - "releases/**"                         # Optional: run when deb files updated
+      - ".github/workflows/test-deb.yml"
 
   pull_request:
     paths:
       - ".github/workflows/test-deb.yml"
-
 
 jobs:
   test-cli-deb:
@@ -31,145 +29,33 @@ jobs:
             container: "zorinos/core:16"
           - os: popos
             container: "popos:22.04"
-          - os: fedora
-            container: "fedora:latest"
-          - os: centos
-            container: "quay.io/centos/centos:stream9"
-          - os: rhel
-            container: "registry.access.redhat.com/ubi9/ubi"
-          - os: alma
-            container: "almalinux:latest"
-          - os: oracle
-            container: "oraclelinux:9"
-          - os: amazon
-            container: "amazonlinux:2023"
-          - os: rocky
-            container: "rockylinux:9"
-          - os: opensuse
-            container: "opensuse/leap:latest"
-          - os: alpine
-            container: "alpine:latest"
-          - os: clearlinux
-            container: "clearlinux:latest"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
+
       - name: Checkout repository
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v4
 
       ###########################################################
-      #  INSTALL DEPENDENCIES PER DISTRO
+      # Install APT dependencies per distro
       ###########################################################
 
-      # Ubuntu Host
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y curl jq file apt-transport-https gdebi-core
+          sudo apt install -y curl jq file gdebi-core apt-transport-https
 
-      # Debian
-      - name: Install deps (Debian)
-        if: matrix.os == 'debian'
+      - name: Install deps (Debian/Kali/LinuxMint/Zorin/PopOS)
+        if: matrix.container != ''
         run: |
           apt update
-          apt install -y curl jq file gdebi-core || true
-
-      # Kali
-      - name: Install deps (Kali)
-        if: matrix.os == 'kali'
-        run: |
-          apt update
-          apt install -y curl jq file gdebi-core || true
-
-      # Linux Mint
-      - name: Install deps (Linux Mint)
-        if: matrix.os == 'linuxmint'
-        run: |
-          apt update
-          apt install -y curl jq file gdebi-core || true
-
-      - name: Install deps (Zorin OS)
-        if: matrix.os == 'zorin'
-        run: |
-          apt update
-          apt install -y curl jq file gdebi-core || true
-
-      - name: Install deps (Pop!_OS)
-        if: matrix.os == 'popos'
-        run: |
-          apt update
-          apt install -y curl jq file gdebi-core || true
-
-      # Fedora
-      - name: Install deps (Fedora)
-        if: matrix.os == 'fedora'
-        run: |
-          dnf install -y curl jq file rpm-build dpkg || true
-
-      # CentOS
-      - name: Install deps (CentOS)
-        if: matrix.os == 'centos'
-        run: |
-          yum install -y curl jq file dpkg || true
-
-      # RHEL
-      - name: Install deps (RHEL)
-        if: matrix.os == 'rhel'
-        run: |
-          yum install -y curl jq file dpkg || true
-
-      # AlmaLinux
-      - name: Install deps (AlmaLinux)
-        if: matrix.os == 'alma'
-        run: |
-          yum install -y curl jq file dpkg || true
-
-      # Oracle Linux
-      - name: Install deps (Oracle)
-        if: matrix.os == 'oracle'
-        run: |
-          yum install -y curl jq file dpkg || true
-
-      # Amazon Linux
-      - name: Install deps (Amazon)
-        if: matrix.os == 'amazon'
-        run: |
-          yum install -y curl jq file dpkg tar gzip git || true
-
-      # Rocky Linux
-      - name: Install deps (Rocky)
-        if: matrix.os == 'rocky'
-        run: |
-          yum install -y curl jq file dpkg || true
-
-      # openSUSE
-      - name: Install deps (openSUSE)
-        if: matrix.os == 'opensuse'
-        run: |
-          zypper refresh
-          zypper install -y curl jq file dpkg || true
-
-      # Alpine (special case: dpkg + fast failure expected)
-      - name: Install deps (Alpine)
-        if: matrix.os == 'alpine'
-        run: |
-          apk update
-          apk add --no-cache curl jq file dpkg gcompat || true
-
-      # Clear Linux
-      - name: Install deps (Clear Linux)
-        if: matrix.os == 'clearlinux'
-        run: |
-          swupd update -y || true
-          swupd bundle-add dpkg curl jq file os-core-dev || true
-
+          apt install -y curl jq file gdebi-core apt-transport-https || true
 
       ###########################################################
-      #  DOWNLOAD .deb PACKAGE
+      # Download .deb package
       ###########################################################
       - name: Download nxsbom-cli .deb package
         run: |
@@ -178,21 +64,36 @@ jobs:
             -o cli_dir/nxsbom-cli.deb
           ls -al cli_dir
 
-
       ###########################################################
-      #  INSTALL .deb PACKAGE
+      # Install .deb package
       ###########################################################
-      - name: Install .deb package
+      - name: Install .deb
         run: |
           echo "Installing .deb on ${{ matrix.os }}"
           dpkg -i cli_dir/nxsbom-cli.deb || true
           apt --fix-broken install -y || true
 
+      ###########################################################
+      # Detect installed binary
+      ###########################################################
+      - name: Detect installed nxsbom-cli binary
+        run: |
+          BIN=$(command -v nxsbom-cli || true)
+
+          if [ -z "$BIN" ]; then
+            echo "❌ ERROR: nxsbom-cli not found after installation"
+            ls -l /usr/local/bin || true
+            ls -l /usr/bin || true
+            exit 1
+          fi
+
+          echo "Binary found at: $BIN"
+          echo "BIN=$BIN" >> $GITHUB_ENV
 
       ###########################################################
-      #  RUN CLI TEST
+      # Run smoke test
       ###########################################################
       - name: Run CLI Test
         run: |
           echo "Running on OS: ${{ matrix.os }}"
-          nxsbom-cli --version || nxsbom-cli -h || true
+          $BIN --version || $BIN -h || true
