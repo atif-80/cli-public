@@ -1,178 +1,133 @@
-name: Test nxsbom-cli (.rpm) on RPM-based distros
+name: Test nxsbom-cli (MUSL binary) across 14 Linux distros
 
 on:
   workflow_dispatch:
-
   push:
     paths:
-      - ".github/workflows/test-rpm.yml"
-
+      - ".github/workflows/test-musl.yml"
   pull_request:
     paths:
-      - ".github/workflows/test-rpm.yml"
+      - ".github/workflows/test-musl.yml"
 
 jobs:
-  test-rpm:
+  test-musl:
     strategy:
       fail-fast: false
       matrix:
         include:
+          - distro: ubuntu
+            container: ""
           - distro: fedora
             container: "fedora:latest"
-            pkgmgr: dnf
-
+          - distro: debian
+            container: "debian:latest"
+          - distro: arch
+            container: "archlinux:latest"
+          - distro: kali
+            container: "kalilinux/kali-rolling"
           - distro: centos
             container: "quay.io/centos/centos:stream9"
-            pkgmgr: yum
-
           - distro: rhel
             container: "registry.access.redhat.com/ubi9/ubi"
-            pkgmgr: yum
-
           - distro: alma
             container: "almalinux:latest"
-            pkgmgr: yum
-
-          - distro: rocky
-            container: "rockylinux:9"
-            pkgmgr: yum
-
           - distro: oracle
             container: "oraclelinux:9"
-            pkgmgr: yum
-
           - distro: amazon
             container: "amazonlinux:2023"
-            pkgmgr: yum
-
+          - distro: rocky
+            container: "rockylinux:9"
           - distro: opensuse
             container: "opensuse/leap:latest"
-            pkgmgr: zypper
+          - distro: alpine
+            container: "alpine:latest"
+          - distro: linuxmint
+            container: "linuxmintd/mint20-amd64"
 
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-      ##########################################################
+      ########################################################
       # Fix Amazon Linux & openSUSE BEFORE checkout
-      ##########################################################
-      - name: Pre-install tar for Amazon & openSUSE BEFORE checkout
+      ########################################################
+      - name: Pre-install tar (Amazon & openSUSE fix)
         if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
         run: |
-          echo ">>> Pre-installing tar, gzip for ${{ matrix.distro }}"
+          echo ">>> Pre-installing tar & gzip for ${{ matrix.distro }}"
           (yum install -y tar gzip || true)
           (dnf install -y tar gzip || true)
           (zypper -n install tar gzip || true)
 
-      ##########################################################
+      ########################################################
+      # Ubuntu host special case
+      ########################################################
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
+        run: |
+          sudo apt update -y
+          sudo apt install -y curl jq file tar gzip
+
+      ########################################################
       # Checkout repo
-      ##########################################################
-      - name: Checkout repository
+      ########################################################
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Print environment
-        run: |
-          echo "Distro: ${{ matrix.distro }}"
-          cat /etc/os-release || true
-          uname -a
+      ########################################################
+      # Install dependencies per distro
+      ########################################################
 
-      ##########################################################
-      # Install dependencies
-      ##########################################################
+      # Debian-family
+      - name: Install deps (Debian/Kali/LinuxMint/Ubuntu inside container)
+        if: matrix.distro == 'debian' || matrix.distro == 'kali' || matrix.distro == 'linuxmint' || matrix.distro == 'ubuntu'
+        run: |
+          apt update || true
+          apt install -y curl jq file tar gzip || true
+
+      # Fedora
       - name: Install deps (Fedora)
         if: matrix.distro == 'fedora'
         run: |
-          dnf -y update || true
-          dnf -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+          dnf -y install curl jq file tar gzip || true
 
-      - name: Install deps (CentOS)
-        if: matrix.distro == 'centos'
+      # CentOS/Alma/RHEL/Rocky/Oracle/Amazon
+      - name: Install deps (RPM family)
+        if: matrix.distro == 'centos' || matrix.distro == 'rhel' || matrix.distro == 'alma' || matrix.distro == 'oracle' || matrix.distro == 'rocky' || matrix.distro == 'amazon'
         run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
+          yum -y install curl jq file tar gzip || true
 
-      - name: Install deps (RHEL)
-        if: matrix.distro == 'rhel'
-        run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
-
-      - name: Install deps (AlmaLinux)
-        if: matrix.distro == 'alma'
-        run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
-
-      - name: Install deps (Rocky)
-        if: matrix.distro == 'rocky'
-        run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
-
-      - name: Install deps (Oracle)
-        if: matrix.distro == 'oracle'
-        run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
-
-      - name: Install deps (Amazon Linux)
-        if: matrix.distro == 'amazon'
-        run: |
-          yum -y update || true
-          yum -y install curl jq file which unzip gzip tar libstdc++.so.6 || true
-
+      # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.distro == 'opensuse'
         run: |
           zypper refresh || true
-          zypper -n install curl jq file which gzip tar unzip libstdc++6 || true
+          zypper -n install curl jq file tar gzip || true
 
-      ##########################################################
-      # Download RPM
-      ##########################################################
-      - name: Download nxsbom-cli RPM
+      # Alpine (musl-native)
+      - name: Install deps (Alpine)
+        if: matrix.distro == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file tar gzip
+
+      ########################################################
+      # Download MUSL binary
+      ########################################################
+      - name: Download MUSL binary
         run: |
           mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-e594b4d_dev-1.x86_64.rpm" \
-            -o cli_dir/nxsbom-cli.rpm
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-musl-x86_64" \
+            -o cli_dir/nxsbom-musl
+          chmod +x cli_dir/nxsbom-musl
           ls -lh cli_dir
 
-      ##########################################################
-      # Install RPM
-      ##########################################################
-      - name: Install RPM (dnf)
-        if: matrix.pkgmgr == 'dnf'
+      ########################################################
+      # Run MUSL binary
+      ########################################################
+      - name: Run MUSL binary
         run: |
-          dnf install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-
-      - name: Install RPM (yum)
-        if: matrix.pkgmgr == 'yum'
-        run: |
-          yum install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-
-      - name: Install RPM (zypper)
-        if: matrix.pkgmgr == 'zypper'
-        run: |
-          zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
-
-      ##########################################################
-      # Locate binary (installed as nxsbom)
-      ##########################################################
-      - name: Locate installed binary
-        run: |
-          BIN=$(command -v nxsbom || true)
-          echo "Found: $BIN"
-          if [ -z "$BIN" ]; then
-            echo "❌ Binary not found (GLIBC error expected for non-Fedora)"
-            exit 1
-          fi
-          echo "BIN=$BIN" >> $GITHUB_ENV
-
-      ##########################################################
-      # Run smoke test
-      ##########################################################
-      - name: Run nxsbom smoke test
-        run: |
-          echo "Testing nxsbom..."
-          $BIN --version || $BIN -h || true
-
+          echo ">>> Running MUSL binary on ${{ matrix.distro }}"
+          echo "----- OUTPUT START -----"
+          ./cli_dir/nxsbom-musl --help || ./cli_dir/nxsbom-musl -h || ./cli_dir/nxsbom-musl --version || true
+          echo "----- OUTPUT END -----"
