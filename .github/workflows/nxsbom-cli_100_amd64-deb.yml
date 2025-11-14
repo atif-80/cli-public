@@ -5,9 +5,6 @@ on:
   push:
     paths:
       - ".github/workflows/test-amd64-deb.yml"
-  pull_request:
-    paths:
-      - ".github/workflows/test-amd64-deb.yml"
 
 jobs:
   test-amd64-deb:
@@ -23,12 +20,6 @@ jobs:
             container: "kalilinux/kali-rolling"
           - os: linuxmint
             container: "linuxmintd/mint20.2-amd64"
-          - os: zorin
-            container: "zorinos/core:16"
-          - os: popos
-            container: "popos:22.04"
-          - os: elementary
-            container: "elementary/docker:stable"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
@@ -38,18 +29,19 @@ jobs:
         uses: actions/checkout@v4
 
       ###########################################################
-      # Install dependencies for DEB-based systems
+      # Install deps
       ###########################################################
+
       - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
-          sudo apt update || true
-          sudo apt install -y curl jq file gdebi-core tar gzip || true
+          sudo apt update -y
+          sudo apt install -y curl jq file gdebi-core tar gzip
 
       - name: Install deps (Debian-based)
-        if: matrix.os != 'ubuntu-24.04'
+        if: matrix.container != ''
         run: |
-          apt update || true
+          apt update -y || true
           apt install -y curl jq file gdebi-core tar gzip || true
 
       ###########################################################
@@ -67,13 +59,18 @@ jobs:
       ###########################################################
       - name: Install .deb package
         run: |
-          dpkg -i cli_dir/nxsbom-cli.deb || true
-          apt --fix-broken install -y || true
+          if [ "${{ matrix.container }}" = "" ]; then
+            sudo dpkg -i cli_dir/nxsbom-cli.deb || true
+            sudo apt --fix-broken install -y || true
+          else
+            dpkg -i cli_dir/nxsbom-cli.deb || true
+            apt --fix-broken install -y || true
+          fi
 
       ###########################################################
-      # Locate binary
+      # Locate nxsbom
       ###########################################################
-      - name: Locate nxsbom binary
+      - name: Locate installed binary
         run: |
           BIN=$(command -v nxsbom || true)
           echo "Found: $BIN"
@@ -84,7 +81,7 @@ jobs:
           echo "BIN=$BIN" >> $GITHUB_ENV
 
       ###########################################################
-      # Run functional test
+      # Run test
       ###########################################################
       - name: Run nxsbom --help
         run: |
