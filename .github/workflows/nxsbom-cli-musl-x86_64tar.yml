@@ -44,17 +44,16 @@ jobs:
           - distro: linuxmint
             container: "linuxmintd/mint20-amd64"
 
-    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     container: ${{ matrix.container }}
 
     steps:
       ########################################################
-      # Fix Amazon & openSUSE (tar missing before checkout)
+      # Fix missing tar for Amazon / openSUSE BEFORE checkout
       ########################################################
-      - name: Pre-install tar for Amazon/openSUSE
+      - name: Pre-install tar (Amazon + openSUSE)
         if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
         run: |
-          echo ">>> Installing tar/gzip early for ${{ matrix.distro }}"
           (yum install -y tar gzip || true)
           (dnf install -y tar gzip || true)
           (zypper -n install tar gzip || true)
@@ -66,50 +65,50 @@ jobs:
         if: matrix.container == ''
         run: |
           sudo apt update -y
-          sudo apt install -y curl jq file tar gzip
+          sudo apt install -y curl jq file tar gzip findutils
 
       ########################################################
-      # Checkout repo
+      # Checkout repository
       ########################################################
       - name: Checkout repo
         uses: actions/checkout@v4
 
       ########################################################
-      # Distro-specific dependencies
+      # Distro-specific dependency installation
       ########################################################
 
-      # Debian-family
-      - name: Install deps (Debian/Kali/LinuxMint/Ubuntu inside container)
+      # Debian family
+      - name: Install deps (Debian/Kali/LinuxMint/Ubuntu container)
         if: matrix.distro == 'debian' || matrix.distro == 'kali' || matrix.distro == 'linuxmint' || matrix.distro == 'ubuntu'
         run: |
           apt update || true
-          apt install -y curl jq file tar gzip || true
+          apt install -y curl jq file tar gzip findutils || true
 
       # Fedora
       - name: Install deps (Fedora)
         if: matrix.distro == 'fedora'
         run: |
-          dnf install -y curl jq file tar gzip || true
+          dnf install -y curl jq file tar gzip findutils || true
 
       # RPM family
       - name: Install deps (CentOS/RHEL/Alma/Rocky/Oracle/Amazon)
         if: matrix.distro == 'centos' || matrix.distro == 'rhel' || matrix.distro == 'alma' || matrix.distro == 'oracle' || matrix.distro == 'rocky' || matrix.distro == 'amazon'
         run: |
-          yum install -y curl jq file tar gzip || true
+          yum install -y curl jq file tar gzip findutils || true
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.distro == 'opensuse'
         run: |
           zypper refresh || true
-          zypper -n install curl jq file tar gzip || true
+          zypper -n install curl jq file tar gzip findutils || true
 
-      # Alpine MUSL
+      # Alpine
       - name: Install deps (Alpine)
         if: matrix.distro == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl jq file tar gzip
+          apk add --no-cache curl jq file tar gzip findutils
 
       ########################################################
       # Download MUSL TAR.GZ
@@ -122,32 +121,33 @@ jobs:
           ls -lh cli_dir
 
       ########################################################
-      # Extract TAR.GZ
+      # Extract TAR + auto-detect binary
       ########################################################
-      - name: Extract musl tar.gz
+      - name: Extract MUSL package
         run: |
           cd cli_dir
           tar -xzf nxsbom-musl.tar.gz
 
-          echo ">>> Listing extracted contents:"
+          echo ">>> Extracted:"
           ls -R .
 
-          # Auto-detect binary inside musl-x86/
-          BIN=$(find . -type f -path "*/musl-x86/nxsbom")
+          # Find MUSL binary inside musl-x86/
+          BIN=$(find "$(pwd)" -type f -path "*/musl-x86/nxsbom" | head -n 1)
 
           if [ -z "$BIN" ]; then
-            echo "❌ MUSL binary not found inside extracted tar"
+            echo "❌ MUSL binary not found!"
             exit 1
           fi
 
           echo "Found MUSL binary: $BIN"
           chmod +x "$BIN"
+
           echo "BIN=$BIN" >> $GITHUB_ENV
 
       ########################################################
-      # Run MUSL binary
+      # Run MUSL binary (absolute path)
       ########################################################
-      - name: Run MUSL binary
+      - name: Run MUSL Binary
         run: |
           echo ">>> Running MUSL binary on ${{ matrix.distro }}"
           echo "----- OUTPUT START -----"
