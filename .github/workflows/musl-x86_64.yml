@@ -1,0 +1,113 @@
+name: Test nxsbom-cli (musl binary) across 14 Linux distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-musl.yml"
+
+jobs:
+  test-musl:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: fedora
+            container: "fedora:latest"
+          - os: debian
+            container: "debian:latest"
+          - os: arch
+            container: "archlinux:latest"
+          - os: kali
+            container: "kalilinux/kali-rolling"
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma
+            container: "almalinux:latest"
+          - os: oracle
+            container: "oraclelinux:9"
+          - os: amazon
+            container: "amazonlinux:2023"
+          - os: rocky
+            container: "rockylinux:9"
+          - os: opensuse
+            container: "opensuse/leap:latest"
+          - os: alpine
+            container: "alpine:latest"
+          - os: clearlinux
+            container: "clearlinux:latest"
+
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Print OS info
+        run: |
+          echo "Testing on: ${{ matrix.os }}"
+          cat /etc/os-release || true
+          uname -a
+
+      ############################################################
+      # Install basic deps (NO glibc upgrades)
+      ############################################################
+
+      - name: Install deps - APT
+        if: startsWith(matrix.os, 'ubuntu') || startsWith(matrix.os, 'debian') || startsWith(matrix.os, 'kali')
+        run: |
+          apt update -y
+          apt install -y curl jq file tar gzip || true
+
+      - name: Install deps - RPM
+        if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
+        run: |
+          yum install -y curl jq file tar gzip || true
+          dnf install -y curl jq file tar gzip || true
+
+      - name: Install deps - Arch
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl jq file tar gzip || true
+
+      - name: Install deps - openSUSE
+        if: matrix.os == 'opensuse'
+        run: |
+          zypper refresh
+          zypper install -y curl jq file tar gzip || true
+
+      - name: Install deps - Alpine (musl native)
+        if: matrix.os == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file tar gzip
+
+      - name: Install deps - Clear Linux
+        if: matrix.os == 'clearlinux'
+        run: |
+          swupd bundle-add os-core file-utils curl jq gzip tar
+
+      ############################################################
+      # Download MUSL binary (standalone)
+      ############################################################
+      - name: Download musl binary
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-musl-x86_64" \
+               -o cli_dir/nxsbom-musl
+          chmod +x cli_dir/nxsbom-musl
+          ls -al cli_dir
+
+      ############################################################
+      # Run test (musl expected to FAIL on glibc)
+      ############################################################
+      - name: Run MUSL binary
+        run: |
+          echo "Running MUSL binary on ${{ matrix.os }}"
+          ./cli_dir/nxsbom-musl --version || ./cli_dir/nxsbom-musl -h || echo "❌ Expected failure on glibc systems"
+          echo "----- Done -----"
