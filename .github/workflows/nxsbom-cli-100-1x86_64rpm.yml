@@ -1,0 +1,144 @@
+name: Test nxsbom-cli (.rpm x86_64) on RPM-based distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-x86_64-rpm.yml"
+
+jobs:
+  test-rpm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: fedora
+            container: "fedora:latest"
+            pkgmgr: dnf
+
+          - distro: centos
+            container: "quay.io/centos/centos:stream9"
+            pkgmgr: yum
+
+          - distro: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+            pkgmgr: yum
+
+          - distro: alma
+            container: "almalinux:latest"
+            pkgmgr: yum
+
+          - distro: rocky
+            container: "rockylinux:9"
+            pkgmgr: yum
+
+          - distro: oracle
+            container: "oraclelinux:9"
+            pkgmgr: yum
+
+          - distro: amazon
+            container: "amazonlinux:2023"
+            pkgmgr: yum
+
+          - distro: opensuse
+            container: "opensuse/leap:latest"
+            pkgmgr: zypper
+
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.container }}
+
+    steps:
+      ##########################################################
+      # Install tar BEFORE checkout (Amazon + openSUSE issue)
+      ##########################################################
+      - name: Pre-install tar/gzip (amazon + opensuse)
+        if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
+        run: |
+          (yum install -y tar gzip || true)
+          (dnf install -y tar gzip || true)
+          (zypper -n install tar gzip || true)
+
+      ##########################################################
+      # Checkout repo
+      ##########################################################
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: OS info
+        run: |
+          echo ">>> Testing on: ${{ matrix.distro }}"
+          cat /etc/os-release || true
+          uname -a || true
+
+      ##########################################################
+      # Install Dependencies per distro
+      ##########################################################
+
+      - name: Install deps (Fedora)
+        if: matrix.distro == 'fedora'
+        run: |
+          dnf -y update || true
+          dnf -y install curl jq file which tar gzip libstdc++.so.6 || true
+
+      - name: Install deps (CentOS/RHEL/Alma/Rocky/Oracle/Amazon)
+        if: matrix.distro == 'centos' || matrix.distro == 'rhel' || matrix.distro == 'alma' || matrix.distro == 'rocky' || matrix.distro == 'oracle' || matrix.distro == 'amazon'
+        run: |
+          yum -y update || true
+          yum -y install curl jq file which tar gzip libstdc++.so.6 || true
+
+      - name: Install deps (openSUSE)
+        if: matrix.distro == 'opensuse'
+        run: |
+          zypper refresh || true
+          zypper -n install curl jq file which tar gzip libstdc++6 || true
+
+      ##########################################################
+      # Download x86_64 RPM
+      ##########################################################
+      - name: Download nxsbom-cli RPM
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.x86_64.rpm" \
+            -o cli_dir/nxsbom-cli.rpm
+          ls -lh cli_dir
+
+      ##########################################################
+      # Install x86_64 RPM
+      ##########################################################
+      - name: Install RPM using dnf
+        if: matrix.pkgmgr == 'dnf'
+        run: |
+          dnf install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
+
+      - name: Install RPM using yum
+        if: matrix.pkgmgr == 'yum'
+        run: |
+          yum install -y ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
+
+      - name: Install RPM using zypper
+        if: matrix.pkgmgr == 'zypper'
+        run: |
+          zypper --non-interactive install ./cli_dir/nxsbom-cli.rpm || rpm -Uvh ./cli_dir/nxsbom-cli.rpm || true
+
+      ##########################################################
+      # Locate installed binary
+      ##########################################################
+      - name: Locate nxsbom binary
+        run: |
+          BIN=$(command -v nxsbom || true)
+          echo "Found: $BIN"
+          if [ -z "$BIN" ]; then
+            echo "❌ Binary not installed — GLIBC mismatch expected"
+            exit 1
+          fi
+          echo "BIN=$BIN" >> $GITHUB_ENV
+
+      ##########################################################
+      # Run CLI test
+      ##########################################################
+      - name: Run nxsbom test
+        run: |
+          echo ">>> Running nxsbom on ${{ matrix.distro }}"
+          $BIN --help || $BIN --version || true
+
+          echo "----- DONE -----"
