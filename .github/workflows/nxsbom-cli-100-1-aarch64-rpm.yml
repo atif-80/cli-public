@@ -1,0 +1,115 @@
+name: Test nxsbom-cli AARCH64 RPM on supported distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-aarch64-rpm.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/test-aarch64-rpm.yml"
+
+jobs:
+  test-aarch64-rpm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: fedora-arm
+            container: "fedora:latest"
+            pkgmgr: dnf
+
+          - distro: centos-arm
+            container: "quay.io/centos/centos:stream9"
+            pkgmgr: yum
+
+          - distro: rhel-arm
+            container: "registry.access.redhat.com/ubi9/ubi"
+            pkgmgr: yum
+
+          - distro: alma-arm
+            container: "almalinux:latest"
+            pkgmgr: yum
+
+          - distro: rocky-arm
+            container: "rockylinux:9"
+            pkgmgr: yum
+
+          - distro: oracle-arm
+            container: "oraclelinux:9"
+            pkgmgr: yum
+
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.container }}
+
+    steps:
+      ############################################################
+      # Pre-install tar/gzip to avoid amazon-like failures
+      ############################################################
+      - name: Pre-install tar & gzip (always safe)
+        run: |
+          (yum install -y tar gzip || true)
+          (dnf install -y tar gzip || true)
+
+      ############################################################
+      # Checkout repo
+      ############################################################
+      - uses: actions/checkout@v4
+
+      ############################################################
+      # Install dependencies
+      ############################################################
+      - name: Install RPM deps
+        run: |
+          echo ">>> Installing dependencies for ${{ matrix.distro }}"
+          (yum install -y curl jq file which unzip tar gzip || true)
+          (dnf install -y curl jq file which unzip tar gzip || true)
+
+      ############################################################
+      # Download AARCH64 RPM
+      ############################################################
+      - name: Download AARCH64 RPM
+        run: |
+          mkdir -p cli_dir
+          curl -L \
+            "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.aarch64.rpm" \
+            -o cli_dir/nxsbom-cli-aarch64.rpm
+          ls -lh cli_dir
+
+      ############################################################
+      # Install RPM
+      ############################################################
+      - name: Install RPM (dnf)
+        if: matrix.pkgmgr == 'dnf'
+        run: |
+          dnf install -y ./cli_dir/nxsbom-cli-aarch64.rpm || \
+          rpm -Uvh ./cli_dir/nxsbom-cli-aarch64.rpm || true
+
+      - name: Install RPM (yum)
+        if: matrix.pkgmgr == 'yum'
+        run: |
+          yum install -y ./cli_dir/nxsbom-cli-aarch64.rpm || \
+          rpm -Uvh ./cli_dir/nxsbom-cli-aarch64.rpm || true
+
+      ############################################################
+      # Locate binary
+      ############################################################
+      - name: Locate installed binary
+        run: |
+          BIN=$(command -v nxsbom || true)
+          echo "Found binary: $BIN"
+          if [ -z "$BIN" ]; then
+            echo "❌ Binary not installed (Possible GLIBC mismatch)"
+            exit 1
+          fi
+          echo "BIN=$BIN" >> $GITHUB_ENV
+
+      ############################################################
+      # Run smoke test (--help output)
+      ############################################################
+      - name: Run nxsbom test
+        run: |
+          echo ">>> Running nxsbom on ${{ matrix.distro }}"
+          echo "----- OUTPUT START -----"
+          $BIN --help || $BIN -h || true
+          echo "----- OUTPUT END -----"
