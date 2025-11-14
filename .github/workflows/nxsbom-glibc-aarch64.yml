@@ -14,34 +14,35 @@ jobs:
         include:
           - os: ubuntu-arm
             image: "ubuntu:24.04"
+
           - os: debian-arm
             image: "debian:latest"
+
           - os: fedora-arm
-            image: "fedora-minimal:39-aarch64"
+            image: "fedora:39"
+
           - os: centos-arm
             image: "quay.io/centos/centos:stream9"
+
           - os: rhel-arm
-            image: "registry.access.redhat.com/ubi9/ubi"
+            image: "registry.access.redhat.com/ubi9/ubi-minimal"
+
           - os: alma-arm
-            image: "almalinux:9-aarch64"
+            image: "almalinux:9"
+
           - os: rocky-arm
-            image: "rockylinux:9-aarch64"
+            image: "rockylinux:9"
+
           - os: oracle-arm
             image: "oraclelinux:9"
 
     runs-on: ubuntu-24.04
 
     steps:
-      ##############################################################
-      # Enable ARM64 Execution via QEMU
-      ##############################################################
-      - name: Enable QEMU multi-arch
+      - name: Enable QEMU for ARM64
         uses: docker/setup-qemu-action@v3
 
-      ##############################################################
-      # Run ARM64 container
-      ##############################################################
-      - name: Run test inside ARM64 container
+      - name: Run ARM64 Test
         uses: addnab/docker-run-action@v3
         with:
           image: ${{ matrix.image }}
@@ -51,9 +52,7 @@ jobs:
             uname -a
             cat /etc/os-release || true
 
-            ###########################################################
-            # Install dependencies
-            ###########################################################
+            # Install deps
             if command -v apt >/dev/null; then
               apt update -y || true
               apt install -y curl jq file tar gzip || true
@@ -65,24 +64,18 @@ jobs:
               zypper -n install curl jq file tar gzip || true
             fi
 
-            ###########################################################
-            # Download aarch64 binary
-            ###########################################################
-            echo ">>> Downloading nxsbom-glibc-aarch64"
+            echo ">>> Downloading AARCH64 binary"
             mkdir -p cli_dir
             curl -L \
               "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-glibc-aarch64" \
               -o cli_dir/nxsbom
             chmod +x cli_dir/nxsbom
 
-            echo "File details:"
+            echo "Binary info:"
             file cli_dir/nxsbom || true
             ls -lh cli_dir
 
-            ###########################################################
-            # Run help output
-            ###########################################################
-            echo ">>> Running ./nxsbom --help"
+            echo ">>> Running --help output"
             cli_dir/nxsbom --help || true
 
-            echo "----- DONE on ${{ matrix.os }} -----"
+            echo "----- DONE: ${{ matrix.os }} -----"
