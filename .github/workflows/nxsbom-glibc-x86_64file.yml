@@ -26,7 +26,7 @@ jobs:
             container: "linuxmintd/mint21-amd64"
             family: deb
 
-          # RPM family
+          # RPM family (x86_64)
           - os: fedora
             container: "fedora:latest"
             family: rpm
@@ -63,29 +63,43 @@ jobs:
     container: ${{ matrix.container }}
 
     steps:
-      - name: Checkout repo
+      ###########################################################
+      # FIX AMAZON + OPENSUSE BEFORE CHECKOUT
+      ###########################################################
+      - name: Pre-install tar for Amazon & openSUSE BEFORE checkout
+        if: matrix.os == 'amazon' || matrix.os == 'opensuse'
+        run: |
+          echo ">>> PRE-INSTALL tar/gzip on ${{ matrix.os }}"
+          (yum install -y tar gzip || true)
+          (dnf install -y tar gzip || true)
+          (zypper -n install tar gzip || true)
+
+      ###########################################################
+      # CHECKOUT
+      ###########################################################
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      ############################################################
-      # INSTALL DEPENDENCIES
-      ############################################################
+      ###########################################################
+      # INSTALL REQUIRED DEPS
+      ###########################################################
 
-      - name: Install deps (Deb-based)
+      - name: Install deps (Debian family)
         if: matrix.family == 'deb'
         run: |
           apt update || true
           apt install -y curl jq file tar gzip libstdc++6 || true
 
-      - name: Install deps (RPM-based)
+      - name: Install deps (RPM family)
         if: matrix.family == 'rpm'
         run: |
           yum install -y curl jq file tar gzip libstdc++.so.6 || \
           dnf install -y curl jq file tar gzip libstdc++.so.6 || \
           zypper -n install curl jq file tar gzip libstdc++6 || true
 
-      ############################################################
-      # DOWNLOAD glibc ELF BINARY
-      ############################################################
+      ###########################################################
+      # DOWNLOAD BINARY
+      ###########################################################
       - name: Download nxsbom-glibc-x86_64
         run: |
           mkdir -p cli_dir
@@ -94,10 +108,10 @@ jobs:
           chmod +x cli_dir/nxsbom-glibc-x86_64
           ls -lh cli_dir
 
-      ############################################################
+      ###########################################################
       # RUN BINARY
-      ############################################################
-      - name: Run nxsbom-glibc-x86_64
+      ###########################################################
+      - name: Run glibc binary
         run: |
           echo "Running on OS: ${{ matrix.os }}"
           ./cli_dir/nxsbom-glibc-x86_64 --help || true
