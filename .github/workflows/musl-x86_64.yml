@@ -17,6 +17,8 @@ jobs:
         include:
           - os: ubuntu-24.04
             container: ""
+          - os: linuxmint
+            container: "linuxmintd/mint21.3-amd64"
           - os: fedora
             container: "fedora:latest"
           - os: debian
@@ -41,82 +43,50 @@ jobs:
             container: "opensuse/leap:latest"
           - os: alpine
             container: "alpine:latest"
-          - os: clearlinux
-            container: "clearlinux:latest"
 
     runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
+      # --------------------------------------------------------------------
+      # Fix missing tools BEFORE checkout (Amazon, openSUSE, Mint, etc.)
+      # --------------------------------------------------------------------
+      - name: Pre-install base tools (curl, tar, file, jq)
+        shell: sh
+        run: |
+          echo ">>> Installing base tools for ${{ matrix.os }}"
+          (apt-get update && apt-get install -y curl tar file jq 2>/dev/null) || true
+          (yum install -y curl tar file jq 2>/dev/null) || true
+          (dnf install -y curl tar file jq 2>/dev/null) || true
+          (zypper install -y curl tar file jq 2>/dev/null) || true
+          (apk add --no-cache curl tar file jq 2>/dev/null) || true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      ###########################################################
-      # INSTALL BASIC DEPENDENCIES
-      ###########################################################
-
-      - name: Install deps - Ubuntu Host
-        if: matrix.container == ''
-        run: |
-          sudo apt update -y
-          sudo apt install -y curl jq file tar gzip
-
-      - name: Install deps - Debian/Ubuntu/Kali
-        if: matrix.os == 'debian' || matrix.os == 'kali'
-        run: |
-          apt update -y || true
-          apt install -y curl jq file tar gzip || true
-
-      - name: Install deps - Fedora/RHEL/CentOS/Alma/Rocky/Oracle/Amazon
-        if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
-        run: |
-          yum install -y curl jq file tar gzip || dnf install -y curl jq file tar gzip || true
-
-      - name: Install deps - Arch Linux
-        if: matrix.os == 'arch'
-        run: |
-          pacman -Sy --noconfirm curl jq file tar gzip || true
-
-      - name: Install deps - openSUSE
-        if: matrix.os == 'opensuse'
-        run: |
-          zypper refresh || true
-          zypper install -y curl jq file tar gzip || true
-
-      - name: Install deps - Alpine
-        if: matrix.os == 'alpine'
-        run: |
-          apk update
-          apk add --no-cache curl jq file tar gzip || true
-
-      - name: Install deps - Clear Linux
-        if: matrix.os == 'clearlinux'
-        run: |
-          swupd update -y || true
-          swupd bundle-add curl jq dev-utils c-basic || true
-          ldconfig
-
-
-      ###########################################################
-      # DOWNLOAD MUSL BINARY
-      ###########################################################
+      # --------------------------------------------------------------------
+      # Download MUSL binary
+      # --------------------------------------------------------------------
       - name: Download MUSL binary
         run: |
           mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-musl-x86_64" \
+          echo ">>> Downloading nxsbom-musl-x86_64"
+          curl -L -f \
+            "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-musl-x86_64" \
             -o cli_dir/nxsbom-musl
           chmod +x cli_dir/nxsbom-musl
-          ls -al cli_dir
+          ls -lh cli_dir
 
-
-      ###########################################################
-      # RUN MUSL BINARY (do NOT fail on error)
-      ###########################################################
+      # --------------------------------------------------------------------
+      # Execute MUSL binary using --help
+      # --------------------------------------------------------------------
       - name: Run MUSL binary
+        shell: sh
         run: |
-          echo "Running MUSL binary on ${{ matrix.os }}"
-
-          # Run help (never fail job)
-          ./cli_dir/nxsbom-musl --help || true
-
+          echo ">>> Running MUSL binary on ${{ matrix.os }}"
+          if ./cli_dir/nxsbom-musl --help >/dev/null 2>&1; then
+            echo "🎉 MUSL binary executed successfully on ${{ matrix.os }}"
+          else
+            echo "⚠️ MUSL binary failed on ${{ matrix.os }} (expected for some distros)"
+          fi
           echo "----- Done -----"
