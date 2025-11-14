@@ -1,4 +1,4 @@
-name: Test nxsbom-cli AARCH64 RPM on supported distros
+name: Test nxsbom-cli AARCH64 RPM on ARM64 distros
 
 on:
   workflow_dispatch:
@@ -11,105 +11,108 @@ on:
 
 jobs:
   test-aarch64-rpm:
+    name: "Test AARCH64 RPM on ${{ matrix.distro }}"
+
+    runs-on: ubuntu-24.04
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - distro: fedora-arm
-            container: "fedora:latest"
+          - distro: fedora
+            image: "fedora:39-aarch64"
             pkgmgr: dnf
 
-          - distro: centos-arm
-            container: "quay.io/centos/centos:stream9"
+          - distro: rocky
+            image: "rockylinux:9-aarch64"
             pkgmgr: yum
 
-          - distro: rhel-arm
-            container: "registry.access.redhat.com/ubi9/ubi"
+          - distro: alma
+            image: "almalinux:9-aarch64"
             pkgmgr: yum
 
-          - distro: alma-arm
-            container: "almalinux:latest"
+          - distro: oracle
+            image: "oraclelinux:9-aarch64"
             pkgmgr: yum
 
-          - distro: rocky-arm
-            container: "rockylinux:9"
+          - distro: centos
+            image: "quay.io/centos/centos:stream9-aarch64"
             pkgmgr: yum
 
-          - distro: oracle-arm
-            container: "oraclelinux:9"
+          - distro: amazon
+            image: "public.ecr.aws/amazonlinux/amazonlinux:2023-aarch64"
             pkgmgr: yum
 
-    runs-on: ubuntu-24.04
-    container: ${{ matrix.container }}
+          - distro: opensuse
+            image: "opensuse/leap:15.6-aarch64"
+            pkgmgr: zypper
 
     steps:
-      ############################################################
-      # Pre-install tar/gzip to avoid amazon-like failures
-      ############################################################
-      - name: Pre-install tar & gzip (always safe)
-        run: |
-          (yum install -y tar gzip || true)
-          (dnf install -y tar gzip || true)
+      ##########################################################
+      # Enable QEMU ARM64 emulation
+      ##########################################################
+      - name: Enable QEMU multi-arch
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
-      ############################################################
-      # Checkout repo
-      ############################################################
-      - uses: actions/checkout@v4
+      ##########################################################
+      # Start ARM64 container
+      ##########################################################
+      - name: Start ARM64 container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.image }}
+          options: --platform=linux/arm64
+          run: |
+            echo "Running on ARM64 container: ${{ matrix.distro }}"
+            uname -a
+            cat /etc/os-release || true
 
-      ############################################################
-      # Install dependencies
-      ############################################################
-      - name: Install RPM deps
-        run: |
-          echo ">>> Installing dependencies for ${{ matrix.distro }}"
-          (yum install -y curl jq file which unzip tar gzip || true)
-          (dnf install -y curl jq file which unzip tar gzip || true)
+            ######################################################
+            # Install required dependencies
+            ######################################################
+            if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
+              dnf -y install curl jq file which tar gzip shadow-utils || true
+            elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
+              yum -y install curl jq file which tar gzip shadow-utils || true
+            elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
+              zypper refresh || true
+              zypper --non-interactive install curl jq file which tar gzip shadow || true
+            fi
 
-      ############################################################
-      # Download AARCH64 RPM
-      ############################################################
-      - name: Download AARCH64 RPM
-        run: |
-          mkdir -p cli_dir
-          curl -L \
-            "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.aarch64.rpm" \
-            -o cli_dir/nxsbom-cli-aarch64.rpm
-          ls -lh cli_dir
+            ######################################################
+            # Download the AARCH64 RPM
+            ######################################################
+            mkdir -p cli_dir
+            curl -L \
+              "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.aarch64.rpm" \
+              -o cli_dir/nxsbom-cli-aarch64.rpm
 
-      ############################################################
-      # Install RPM
-      ############################################################
-      - name: Install RPM (dnf)
-        if: matrix.pkgmgr == 'dnf'
-        run: |
-          dnf install -y ./cli_dir/nxsbom-cli-aarch64.rpm || \
-          rpm -Uvh ./cli_dir/nxsbom-cli-aarch64.rpm || true
+            ls -lh cli_dir
 
-      - name: Install RPM (yum)
-        if: matrix.pkgmgr == 'yum'
-        run: |
-          yum install -y ./cli_dir/nxsbom-cli-aarch64.rpm || \
-          rpm -Uvh ./cli_dir/nxsbom-cli-aarch64.rpm || true
+            ######################################################
+            # Install AARCH64 RPM
+            ######################################################
+            if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
+              dnf install -y cli_dir/nxsbom-cli-aarch64.rpm || true
+            elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
+              yum install -y cli_dir/nxsbom-cli-aarch64.rpm || true
+            elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
+              zypper --non-interactive install cli_dir/nxsbom-cli-aarch64.rpm || true
+            fi
 
-      ############################################################
-      # Locate binary
-      ############################################################
-      - name: Locate installed binary
-        run: |
-          BIN=$(command -v nxsbom || true)
-          echo "Found binary: $BIN"
-          if [ -z "$BIN" ]; then
-            echo "❌ Binary not installed (Possible GLIBC mismatch)"
-            exit 1
-          fi
-          echo "BIN=$BIN" >> $GITHUB_ENV
+            ######################################################
+            # Verify binary
+            ######################################################
+            BIN=$(command -v nxsbom || true)
+            echo "Binary found: $BIN"
 
-      ############################################################
-      # Run smoke test (--help output)
-      ############################################################
-      - name: Run nxsbom test
-        run: |
-          echo ">>> Running nxsbom on ${{ matrix.distro }}"
-          echo "----- OUTPUT START -----"
-          $BIN --help || $BIN -h || true
-          echo "----- OUTPUT END -----"
+            if [ -z "$BIN" ]; then
+              echo "❌ Binary not installed (architecture mismatch?)"
+              exit 1
+            fi
+
+            echo "Running --help"
+            $BIN --help || $BIN --version || true
+
