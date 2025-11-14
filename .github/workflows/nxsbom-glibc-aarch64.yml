@@ -1,0 +1,88 @@
+name: Test nxsbom-glibc-aarch64 on ARM64 Distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-glibc-aarch64.yml"
+
+jobs:
+  test-aarch64:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-arm
+            image: "ubuntu:24.04"
+          - os: debian-arm
+            image: "debian:latest"
+          - os: fedora-arm
+            image: "fedora-minimal:39-aarch64"
+          - os: centos-arm
+            image: "quay.io/centos/centos:stream9"
+          - os: rhel-arm
+            image: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma-arm
+            image: "almalinux:9-aarch64"
+          - os: rocky-arm
+            image: "rockylinux:9-aarch64"
+          - os: oracle-arm
+            image: "oraclelinux:9"
+
+    runs-on: ubuntu-24.04
+
+    steps:
+      ##############################################################
+      # Enable ARM64 Execution via QEMU
+      ##############################################################
+      - name: Enable QEMU multi-arch
+        uses: docker/setup-qemu-action@v3
+
+      ##############################################################
+      # Run ARM64 container
+      ##############################################################
+      - name: Run test inside ARM64 container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.image }}
+          options: "--platform linux/arm64"
+          run: |
+            echo ">>> Running on ${{ matrix.os }}"
+            uname -a
+            cat /etc/os-release || true
+
+            ###########################################################
+            # Install dependencies
+            ###########################################################
+            if command -v apt >/dev/null; then
+              apt update -y || true
+              apt install -y curl jq file tar gzip || true
+            elif command -v dnf >/dev/null; then
+              dnf install -y curl jq file tar gzip || true
+            elif command -v yum >/dev/null; then
+              yum install -y curl jq file tar gzip || true
+            elif command -v zypper >/dev/null; then
+              zypper -n install curl jq file tar gzip || true
+            fi
+
+            ###########################################################
+            # Download aarch64 binary
+            ###########################################################
+            echo ">>> Downloading nxsbom-glibc-aarch64"
+            mkdir -p cli_dir
+            curl -L \
+              "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-glibc-aarch64" \
+              -o cli_dir/nxsbom
+            chmod +x cli_dir/nxsbom
+
+            echo "File details:"
+            file cli_dir/nxsbom || true
+            ls -lh cli_dir
+
+            ###########################################################
+            # Run help output
+            ###########################################################
+            echo ">>> Running ./nxsbom --help"
+            cli_dir/nxsbom --help || true
+
+            echo "----- DONE on ${{ matrix.os }} -----"
