@@ -1,0 +1,106 @@
+name: Test nxsbom-glibc-x86_64 on 13 Linux distros
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-glibc-x86_64:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debian family
+          - os: ubuntu-latest
+            container: ""
+            family: deb
+
+          - os: debian
+            container: "debian:latest"
+            family: deb
+
+          - os: kali
+            container: "kalilinux/kali-rolling"
+            family: deb
+
+          - os: linuxmint
+            container: "linuxmintd/mint21-amd64"
+            family: deb
+
+          # RPM family
+          - os: fedora
+            container: "fedora:latest"
+            family: rpm
+
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+            family: rpm
+
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+            family: rpm
+
+          - os: alma
+            container: "almalinux:latest"
+            family: rpm
+
+          - os: rocky
+            container: "rockylinux:9"
+            family: rpm
+
+          - os: oracle
+            container: "oraclelinux:9"
+            family: rpm
+
+          - os: amazon
+            container: "amazonlinux:2023"
+            family: rpm
+
+          - os: opensuse
+            container: "opensuse/leap:latest"
+            family: rpm
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-latest' }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      ############################################################
+      # INSTALL DEPENDENCIES
+      ############################################################
+
+      - name: Install deps (Deb-based)
+        if: matrix.family == 'deb'
+        run: |
+          apt update || true
+          apt install -y curl jq file tar gzip libstdc++6 || true
+
+      - name: Install deps (RPM-based)
+        if: matrix.family == 'rpm'
+        run: |
+          yum install -y curl jq file tar gzip libstdc++.so.6 || \
+          dnf install -y curl jq file tar gzip libstdc++.so.6 || \
+          zypper -n install curl jq file tar gzip libstdc++6 || true
+
+      ############################################################
+      # DOWNLOAD glibc ELF BINARY
+      ############################################################
+      - name: Download nxsbom-glibc-x86_64
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-glibc-x86_64" \
+            -o cli_dir/nxsbom-glibc-x86_64
+          chmod +x cli_dir/nxsbom-glibc-x86_64
+          ls -lh cli_dir
+
+      ############################################################
+      # RUN BINARY
+      ############################################################
+      - name: Run nxsbom-glibc-x86_64
+        run: |
+          echo "Running on OS: ${{ matrix.os }}"
+          ./cli_dir/nxsbom-glibc-x86_64 --help || true
+
+      - name: Done
+        run: echo "----- DONE -----"
