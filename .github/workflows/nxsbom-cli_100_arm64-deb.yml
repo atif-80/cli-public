@@ -1,0 +1,80 @@
+name: Test nxsbom-cli ARM64 .deb on supported distros
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-arm64-deb:
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-arm64
+            image: "arm64v8/ubuntu:24.04"
+          - os: debian-arm64
+            image: "arm64v8/debian:latest"
+          - os: kali-arm64
+            image: "kalilinux/kali-rolling"
+
+    steps:
+      # -----------------------------------------------------
+      # Enable QEMU for ARM64 containers
+      # -----------------------------------------------------
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # -----------------------------------------------------
+      # Checkout repo
+      # -----------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------
+      # Run ARM64 container & install ARM64 .deb inside
+      # -----------------------------------------------------
+      - name: Run ARM64 test container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.image }}
+          options: |
+            --platform linux/arm64
+            -v ${{ github.workspace }}:/workspace
+          run: |
+            set -e
+
+            echo ">>> Running on ${{ matrix.os }}"
+            cd /workspace
+
+            # Install deps
+            if command -v apt >/dev/null 2>&1; then
+              apt update || true
+              apt install -y curl jq file tar gzip libstdc++6 || true
+            fi
+
+            # Download ARM64 .deb
+            mkdir -p cli_dir
+            curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli_1.0.0_arm64.deb" \
+                -o cli_dir/nxsbom-cli_arm64.deb
+
+            ls -lh cli_dir
+
+            # Install .deb
+            dpkg -i cli_dir/nxsbom-cli_arm64.deb || apt --fix-broken install -y
+
+            # Locate binary
+            BIN=$(command -v nxsbom || true)
+            echo "Found binary: $BIN"
+
+            if [ -z "$BIN" ]; then
+              echo "❌ Binary not installed"
+              exit 1
+            fi
+
+            echo ">>> Running nxsbom --help"
+            $BIN --help || $BIN -h || true
+
+            echo "----- Done -----"
