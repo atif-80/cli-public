@@ -1,0 +1,92 @@
+name: Test nxsbom-cli (.deb AMD64) on DEB-based distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-amd64-deb.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/test-amd64-deb.yml"
+
+jobs:
+  test-amd64-deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            container: ""
+          - os: debian
+            container: "debian:latest"
+          - os: kali
+            container: "kalilinux/kali-rolling"
+          - os: linuxmint
+            container: "linuxmintd/mint20.2-amd64"
+          - os: zorin
+            container: "zorinos/core:16"
+          - os: popos
+            container: "popos:22.04"
+          - os: elementary
+            container: "elementary/docker:stable"
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      ###########################################################
+      # Install dependencies for DEB-based systems
+      ###########################################################
+      - name: Install deps (Ubuntu host)
+        if: matrix.container == ''
+        run: |
+          sudo apt update || true
+          sudo apt install -y curl jq file gdebi-core tar gzip || true
+
+      - name: Install deps (Debian-based)
+        if: matrix.os != 'ubuntu-24.04'
+        run: |
+          apt update || true
+          apt install -y curl jq file gdebi-core tar gzip || true
+
+      ###########################################################
+      # Download the .deb package
+      ###########################################################
+      - name: Download nxsbom-cli AMD64 .deb
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli_1.0.0_amd64.deb" \
+            -o cli_dir/nxsbom-cli.deb
+          ls -lh cli_dir
+
+      ###########################################################
+      # Install .deb
+      ###########################################################
+      - name: Install .deb package
+        run: |
+          dpkg -i cli_dir/nxsbom-cli.deb || true
+          apt --fix-broken install -y || true
+
+      ###########################################################
+      # Locate binary
+      ###########################################################
+      - name: Locate nxsbom binary
+        run: |
+          BIN=$(command -v nxsbom || true)
+          echo "Found: $BIN"
+          if [ -z "$BIN" ]; then
+            echo "❌ nxsbom binary not installed"
+            exit 1
+          fi
+          echo "BIN=$BIN" >> $GITHUB_ENV
+
+      ###########################################################
+      # Run functional test
+      ###########################################################
+      - name: Run nxsbom --help
+        run: |
+          echo ">>> Running on ${{ matrix.os }}"
+          $BIN --help || $BIN -h || true
