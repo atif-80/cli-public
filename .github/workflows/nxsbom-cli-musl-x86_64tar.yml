@@ -1,0 +1,155 @@
+name: Test nxsbom-cli (MUSL tar.gz) across 14 Linux distros
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-musl-targz.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/test-musl-targz.yml"
+
+jobs:
+  test-musl-tar:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            container: ""
+          - distro: fedora
+            container: "fedora:latest"
+          - distro: debian
+            container: "debian:latest"
+          - distro: arch
+            container: "archlinux:latest"
+          - distro: kali
+            container: "kalilinux/kali-rolling"
+          - distro: centos
+            container: "quay.io/centos/centos:stream9"
+          - distro: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+          - distro: alma
+            container: "almalinux:latest"
+          - distro: oracle
+            container: "oraclelinux:9"
+          - distro: amazon
+            container: "amazonlinux:2023"
+          - distro: rocky
+            container: "rockylinux:9"
+          - distro: opensuse
+            container: "opensuse/leap:latest"
+          - distro: alpine
+            container: "alpine:latest"
+          - distro: linuxmint
+            container: "linuxmintd/mint20-amd64"
+
+    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
+    container: ${{ matrix.container }}
+
+    steps:
+      ########################################################
+      # Fix Amazon & openSUSE (tar missing before checkout)
+      ########################################################
+      - name: Pre-install tar for Amazon/openSUSE
+        if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
+        run: |
+          echo ">>> Installing tar/gzip early for ${{ matrix.distro }}"
+          (yum install -y tar gzip || true)
+          (dnf install -y tar gzip || true)
+          (zypper -n install tar gzip || true)
+
+      ########################################################
+      # Ubuntu host dependencies
+      ########################################################
+      - name: Install deps on Ubuntu host
+        if: matrix.container == ''
+        run: |
+          sudo apt update -y
+          sudo apt install -y curl jq file tar gzip
+
+      ########################################################
+      # Checkout repo
+      ########################################################
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      ########################################################
+      # Distro-specific dependencies
+      ########################################################
+
+      # Debian-family
+      - name: Install deps (Debian/Kali/LinuxMint/Ubuntu inside container)
+        if: matrix.distro == 'debian' || matrix.distro == 'kali' || matrix.distro == 'linuxmint' || matrix.distro == 'ubuntu'
+        run: |
+          apt update || true
+          apt install -y curl jq file tar gzip || true
+
+      # Fedora
+      - name: Install deps (Fedora)
+        if: matrix.distro == 'fedora'
+        run: |
+          dnf install -y curl jq file tar gzip || true
+
+      # RPM family
+      - name: Install deps (CentOS/RHEL/Alma/Rocky/Oracle/Amazon)
+        if: matrix.distro == 'centos' || matrix.distro == 'rhel' || matrix.distro == 'alma' || matrix.distro == 'oracle' || matrix.distro == 'rocky' || matrix.distro == 'amazon'
+        run: |
+          yum install -y curl jq file tar gzip || true
+
+      # openSUSE
+      - name: Install deps (openSUSE)
+        if: matrix.distro == 'opensuse'
+        run: |
+          zypper refresh || true
+          zypper -n install curl jq file tar gzip || true
+
+      # Alpine MUSL
+      - name: Install deps (Alpine)
+        if: matrix.distro == 'alpine'
+        run: |
+          apk update
+          apk add --no-cache curl jq file tar gzip
+
+      ########################################################
+      # Download MUSL TAR.GZ
+      ########################################################
+      - name: Download MUSL tar.gz
+        run: |
+          mkdir -p cli_dir
+          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-musl-x86_64.tar.gz" \
+            -o cli_dir/nxsbom-musl.tar.gz
+          ls -lh cli_dir
+
+      ########################################################
+      # Extract TAR.GZ
+      ########################################################
+      - name: Extract musl tar.gz
+        run: |
+          cd cli_dir
+          tar -xzf nxsbom-musl.tar.gz
+
+          echo ">>> Listing extracted contents:"
+          ls -R .
+
+          # Auto-detect binary inside musl-x86/
+          BIN=$(find . -type f -path "*/musl-x86/nxsbom")
+
+          if [ -z "$BIN" ]; then
+            echo "❌ MUSL binary not found inside extracted tar"
+            exit 1
+          fi
+
+          echo "Found MUSL binary: $BIN"
+          chmod +x "$BIN"
+          echo "BIN=$BIN" >> $GITHUB_ENV
+
+      ########################################################
+      # Run MUSL binary
+      ########################################################
+      - name: Run MUSL binary
+        run: |
+          echo ">>> Running MUSL binary on ${{ matrix.distro }}"
+          echo "----- OUTPUT START -----"
+          $BIN --help || $BIN -h || $BIN --version || true
+          echo "----- OUTPUT END -----"
