@@ -11,102 +11,152 @@ jobs:
         include:
           - os: ubuntu
             container: ""
+
           - os: debian
             container: "debian:latest"
-          - os: kali
-            container: "kalilinux/kali-rolling"
-          - os: linuxmint
-            container: "linuxmintd/mint21-amd64"
+
           - os: fedora
             container: "fedora:latest"
+
           - os: arch
             container: "archlinux:latest"
+
+          - os: kali
+            container: "kalilinux/kali-rolling"
+
           - os: centos
             container: "quay.io/centos/centos:stream9"
+
           - os: rhel
             container: "registry.access.redhat.com/ubi9/ubi"
+
           - os: alma
             container: "almalinux:latest"
+
           - os: rocky
             container: "rockylinux:9"
+
           - os: oracle
             container: "oraclelinux:9"
+
           - os: amazon
             container: "amazonlinux:2023"
+
           - os: opensuse
             container: "opensuse/leap:latest"
+
           - os: alpine
             container: "alpine:latest"
 
-    runs-on: ubuntu-24.04
+          - os: linuxmint
+            container: "linuxmintd/mint21-amd64"
+
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-      - name: Fix missing tar/find (Amazon + openSUSE)
-        if: matrix.os == 'amazon' || matrix.os == 'opensuse'
-        run: |
-          echo ">>> Pre-installing tar, gzip, findutils"
-          (yum install -y tar gzip findutils || true)
-          (dnf install -y tar gzip findutils || true)
-          (zypper install -y tar gzip findutils || true)
+    ###########################################################################
+    # PRE-INSTALL TAR FOR AMAZON + OPENSUSE (BEFORE CHECKOUT)
+    ###########################################################################
+    - name: Fix tar on Amazon & openSUSE
+      if: matrix.os == 'amazon' || matrix.os == 'opensuse'
+      run: |
+        echo ">>> Pre-install tar for ${matrix.os}"
+        (yum install -y tar gzip || true)
+        (dnf install -y tar gzip || true)
+        (zypper -n install tar gzip || true)
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    ###########################################################################
+    # CHECKOUT
+    ###########################################################################
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          case "${{ matrix.os }}" in
-            ubuntu|debian|kali|linuxmint)
-              apt update || true
-              apt install -y curl jq tar gzip file findutils || true
-              ;;
-            fedora)
-              dnf install -y curl jq tar gzip file findutils || true
-              ;;
-            centos|rhel|alma|rocky|oracle|amazon)
-              yum install -y curl jq tar gzip file findutils || true
-              ;;
-            opensuse)
-              zypper refresh || true
-              zypper install -y curl jq tar gzip file findutils || true
-              ;;
-            arch)
-              pacman -Sy --noconfirm curl jq tar gzip file findutils || true
-              ;;
-            alpine)
-              apk update
-              apk add --no-cache curl jq tar gzip file findutils || true
-              ;;
-          esac
+    ###########################################################################
+    # INSTALL DEPENDENCIES PER DISTRO
+    ###########################################################################
+    - name: Install deps (Debian/Ubuntu/Kali/LinuxMint)
+      if: matrix.os == 'ubuntu' || matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'linuxmint'
+      run: |
+        apt update || true
+        apt install -y curl jq file tar gzip || true
 
-      - name: Download TAR
-        run: |
-          mkdir -p cli_dir
-          curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-x86_64.tar.gz" \
-            -o cli_dir/glibc-x86.tar.gz
+    - name: Install deps (RPM Distros)
+      if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle' || matrix.os == 'amazon'
+      run: |
+        yum install -y curl jq file tar gzip || \
+        dnf install -y curl jq file tar gzip || true
 
-      - name: Extract TAR
-        run: |
-          cd cli_dir
-          tar -xzf glibc-x86.tar.gz
+    - name: Install deps (Arch Linux)
+      if: matrix.os == 'arch'
+      run: |
+        pacman -Sy --noconfirm curl jq file tar gzip || true
 
-          echo ">>> Extracted:"
-          ls -R .
+    - name: Install deps (openSUSE)
+      if: matrix.os == 'opensuse'
+      run: |
+        zypper refresh || true
+        zypper -n install curl jq file tar gzip || true
 
-      - name: Detect binary
-        run: |
-          cd cli_dir
-          BIN=$(find . -type f -name nxsbom | head -n 1)
-          echo "BIN=$BIN" >> $GITHUB_ENV
-          echo "Detected binary: $BIN"
+    - name: Install deps (Alpine)
+      if: matrix.os == 'alpine'
+      run: |
+        apk update
+        apk add --no-cache curl jq file tar gzip
 
-      - name: Run binary (allow glibc failure)
-        run: |
-          echo ">>> Running $BIN on ${{ matrix.os }}"
-          
-          # Use bash -c to avoid LD loader relative-path error
-          bash -c "$BIN --help" || \
-          bash -c "$BIN -h" || \
-          echo "⚠ Expected glibc/musl failure on ${{ matrix.os }}"
-          
-          echo "----- DONE -----"
+    ###########################################################################
+    # DOWNLOAD TARBALL
+    ###########################################################################
+    - name: Download nxsbom-cli glibc-x86_64 TAR
+      run: |
+        mkdir -p cli_dir
+        curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-x86_64.tar.gz" \
+          -o cli_dir/nxsbom-glibc.tar.gz
+        ls -lh cli_dir
+
+    ###########################################################################
+    # EXTRACT TAR & DETECT BINARY
+    ###########################################################################
+    - name: Extract tarball
+      run: |
+        cd cli_dir
+        tar -xzf nxsbom-glibc.tar.gz || true
+        echo ">>> Extracted:"
+        ls -R .
+
+    - name: Locate binary
+      run: |
+        echo ">>> Searching for nxsbom inside extracted dirs..."
+        BIN=$(find cli_dir -type f -name nxsbom | head -n 1 || true)
+
+        if [ -z "$BIN" ]; then
+          echo "❌ No nxsbom binary found!"
+          exit 1
+        fi
+
+        echo "FOUND_BIN=$BIN" >> $GITHUB_ENV
+        echo "Found at: $BIN"
+
+    ###########################################################################
+    # RUN BINARY (FIXED WORKDIR EXECUTION)
+    ###########################################################################
+    - name: Execute binary with --help
+      run: |
+        echo ">>> Executing binary on OS: ${{ matrix.os }}"
+
+        BIN="${FOUND_BIN}"
+        BIN_DIR=$(dirname "$BIN")
+        BIN_FILE=$(basename "$BIN")
+
+        echo "Binary dir: $BIN_DIR"
+        echo "Binary file: $BIN_FILE"
+
+        chmod +x "$BIN"
+
+        # Correct execution with directory change
+        bash -c "cd $BIN_DIR && ./$BIN_FILE --help" || \
+        bash -c "cd $BIN_DIR && ./$BIN_FILE -h" || \
+        echo "⚠ Expected loader/glibc issue on ${{ matrix.os }}"
+
+        echo "----- DONE -----"
+
