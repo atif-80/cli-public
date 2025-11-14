@@ -49,14 +49,15 @@ jobs:
 
     steps:
       ########################################################
-      # Fix missing tar for Amazon / openSUSE BEFORE checkout
+      # Fix Amazon + openSUSE BEFORE checkout
       ########################################################
-      - name: Pre-install tar (Amazon + openSUSE)
+      - name: Pre-install tar + findutils (Amazon + openSUSE)
         if: matrix.distro == 'amazon' || matrix.distro == 'opensuse'
         run: |
-          (yum install -y tar gzip || true)
-          (dnf install -y tar gzip || true)
-          (zypper -n install tar gzip || true)
+          echo ">>> Installing tar, gzip, findutils early for ${{ matrix.distro }}"
+          (yum install -y tar gzip findutils || true)
+          (dnf install -y tar gzip findutils || true)
+          (zypper -n install tar gzip findutils || true)
 
       ########################################################
       # Ubuntu host dependencies
@@ -77,33 +78,28 @@ jobs:
       # Distro-specific dependency installation
       ########################################################
 
-      # Debian family
       - name: Install deps (Debian/Kali/LinuxMint/Ubuntu container)
         if: matrix.distro == 'debian' || matrix.distro == 'kali' || matrix.distro == 'linuxmint' || matrix.distro == 'ubuntu'
         run: |
           apt update || true
           apt install -y curl jq file tar gzip findutils || true
 
-      # Fedora
       - name: Install deps (Fedora)
         if: matrix.distro == 'fedora'
         run: |
           dnf install -y curl jq file tar gzip findutils || true
 
-      # RPM family
       - name: Install deps (CentOS/RHEL/Alma/Rocky/Oracle/Amazon)
         if: matrix.distro == 'centos' || matrix.distro == 'rhel' || matrix.distro == 'alma' || matrix.distro == 'oracle' || matrix.distro == 'rocky' || matrix.distro == 'amazon'
         run: |
           yum install -y curl jq file tar gzip findutils || true
 
-      # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.distro == 'opensuse'
         run: |
           zypper refresh || true
           zypper -n install curl jq file tar gzip findutils || true
 
-      # Alpine
       - name: Install deps (Alpine)
         if: matrix.distro == 'alpine'
         run: |
@@ -111,7 +107,7 @@ jobs:
           apk add --no-cache curl jq file tar gzip findutils
 
       ########################################################
-      # Download MUSL TAR.GZ
+      # Download MUSL tar.gz
       ########################################################
       - name: Download MUSL tar.gz
         run: |
@@ -121,7 +117,7 @@ jobs:
           ls -lh cli_dir
 
       ########################################################
-      # Extract TAR + auto-detect binary
+      # Extract + detect binary
       ########################################################
       - name: Extract MUSL package
         run: |
@@ -131,7 +127,7 @@ jobs:
           echo ">>> Extracted:"
           ls -R .
 
-          # Find MUSL binary inside musl-x86/
+          # AUTO-DETECT MUSL BINARY
           BIN=$(find "$(pwd)" -type f -path "*/musl-x86/nxsbom" | head -n 1)
 
           if [ -z "$BIN" ]; then
@@ -141,11 +137,10 @@ jobs:
 
           echo "Found MUSL binary: $BIN"
           chmod +x "$BIN"
-
           echo "BIN=$BIN" >> $GITHUB_ENV
 
       ########################################################
-      # Run MUSL binary (absolute path)
+      # Run MUSL binary
       ########################################################
       - name: Run MUSL Binary
         run: |
