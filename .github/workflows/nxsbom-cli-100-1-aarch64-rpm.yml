@@ -2,117 +2,94 @@ name: Test nxsbom-cli AARCH64 RPM on ARM64 distros
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/test-aarch64-rpm.yml"
-  pull_request:
-    paths:
-      - ".github/workflows/test-aarch64-rpm.yml"
 
 jobs:
   test-aarch64-rpm:
-    name: "Test AARCH64 RPM on ${{ matrix.distro }}"
-
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - distro: fedora
-            image: "fedora:39-aarch64"
+          - name: fedora
+            image: fedora:latest
             pkgmgr: dnf
 
-          - distro: rocky
-            image: "rockylinux:9-aarch64"
+          - name: centos
+            image: quay.io/centos/centos:stream9
             pkgmgr: yum
 
-          - distro: alma
-            image: "almalinux:9-aarch64"
+          - name: rhel
+            image: registry.access.redhat.com/ubi9/ubi
             pkgmgr: yum
 
-          - distro: oracle
-            image: "oraclelinux:9-aarch64"
+          - name: alma
+            image: almalinux:9
             pkgmgr: yum
 
-          - distro: centos
-            image: "quay.io/centos/centos:stream9-aarch64"
+          - name: rocky
+            image: rockylinux:9
             pkgmgr: yum
 
-          - distro: amazon
-            image: "public.ecr.aws/amazonlinux/amazonlinux:2023-aarch64"
+          - name: oracle
+            image: oraclelinux:9
             pkgmgr: yum
-
-          - distro: opensuse
-            image: "opensuse/leap:15.6-aarch64"
-            pkgmgr: zypper
 
     steps:
-      ##########################################################
-      # Enable QEMU ARM64 emulation
-      ##########################################################
-      - name: Enable QEMU multi-arch
+      # --------------------------
+      # Enable ARM64 via QEMU
+      # --------------------------
+      - name: Enable ARM64 emulation
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      ##########################################################
-      # Start ARM64 container
-      ##########################################################
-      - name: Start ARM64 container
+      # --------------------------
+      # Run each ARM64 distro
+      # --------------------------
+      - name: Run ARM64 container test
         uses: addnab/docker-run-action@v3
         with:
           image: ${{ matrix.image }}
-          options: --platform=linux/arm64
+          options: "--platform linux/arm64"
           run: |
-            echo "Running on ARM64 container: ${{ matrix.distro }}"
-            uname -a
+            echo "===== Testing on ${{ matrix.name }} ====="
+            uname -a || true
             cat /etc/os-release || true
 
-            ######################################################
-            # Install required dependencies
-            ######################################################
+            # Install dependencies
             if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
-              dnf -y install curl jq file which tar gzip shadow-utils || true
-            elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
-              yum -y install curl jq file which tar gzip shadow-utils || true
-            elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
-              zypper refresh || true
-              zypper --non-interactive install curl jq file which tar gzip shadow || true
+              dnf -y install tar gzip curl jq file libstdc++.so.6 || true
+            else
+              yum -y install tar gzip curl jq file libstdc++.so.6 || true
             fi
 
-            ######################################################
-            # Download the AARCH64 RPM
-            ######################################################
+            # Download RPM
             mkdir -p cli_dir
-            curl -L \
-              "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.aarch64.rpm" \
-              -o cli_dir/nxsbom-cli-aarch64.rpm
+            curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-1.0.0-1.aarch64.rpm" \
+              -o cli_dir/nxsbom-cli.rpm
 
+            echo "Files downloaded:"
             ls -lh cli_dir
 
-            ######################################################
-            # Install AARCH64 RPM
-            ######################################################
+            # Install RPM
             if [ "${{ matrix.pkgmgr }}" = "dnf" ]; then
-              dnf install -y cli_dir/nxsbom-cli-aarch64.rpm || true
-            elif [ "${{ matrix.pkgmgr }}" = "yum" ]; then
-              yum install -y cli_dir/nxsbom-cli-aarch64.rpm || true
-            elif [ "${{ matrix.pkgmgr }}" = "zypper" ]; then
-              zypper --non-interactive install cli_dir/nxsbom-cli-aarch64.rpm || true
+              dnf install -y ./cli_dir/nxsbom-cli.rpm || true
+            else
+              yum install -y ./cli_dir/nxsbom-cli.rpm || true
             fi
 
-            ######################################################
-            # Verify binary
-            ######################################################
+            # Locate installed binary
             BIN=$(command -v nxsbom || true)
-            echo "Binary found: $BIN"
+            echo "Binary path: $BIN"
 
             if [ -z "$BIN" ]; then
-              echo "❌ Binary not installed (architecture mismatch?)"
+              echo "❌ Binary not found (wrong arch or glibc mismatch)"
               exit 1
             fi
 
-            echo "Running --help"
-            $BIN --help || $BIN --version || true
+            # Run smoke test
+            echo ">>> Running nxsbom --help"
+            $BIN --help || $BIN -h || true
 
+            echo "----- Completed distro: ${{ matrix.name }} -----"
