@@ -2,6 +2,12 @@ name: Test nxsbom-cli x86_64 AppImage on 14 Linux distros
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-appimage.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/test-appimage.yml"
 
 jobs:
   test-appimage:
@@ -11,10 +17,10 @@ jobs:
         include:
           - os: ubuntu
             container: ""
-          - os: fedora
-            container: "fedora:latest"
           - os: debian
             container: "debian:latest"
+          - os: fedora
+            container: "fedora:latest"
           - os: arch
             container: "archlinux:latest"
           - os: kali
@@ -25,121 +31,144 @@ jobs:
             container: "registry.access.redhat.com/ubi9/ubi"
           - os: alma
             container: "almalinux:latest"
-          - os: oracle
-            container: "oraclelinux:9"
-          - os: amazon
-            container: "amazonlinux:2023"
           - os: rocky
             container: "rockylinux:9"
+          - os: oracle
+            container: "oraclelinux:9"
           - os: opensuse
             container: "opensuse/leap:latest"
+          - os: amazon
+            container: "amazonlinux:2023"
           - os: alpine
             container: "alpine:latest"
           - os: linuxmint
-            container: "linuxmintd/mint21.2-amd64"
+            container: "linuxmintd/mint20.2-amd64"
 
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
-
-      ###############################################################
-      # FIX Amazon Linux & openSUSE: Install tar BEFORE checkout
-      ###############################################################
-      - name: Install tar before checkout (Amazon/openSUSE)
+      ##########################################################
+      # Fix Amazon + openSUSE BEFORE checkout
+      ##########################################################
+      - name: Pre-install tar for Amazon & openSUSE
         if: matrix.os == 'amazon' || matrix.os == 'opensuse'
         run: |
-          echo ">>> Pre-install tar & curl for ${{ matrix.os }}"
+          echo ">>> Pre-installing tar/gzip for ${{ matrix.os }}"
           (yum install -y tar gzip curl || true)
           (dnf install -y tar gzip curl || true)
           (zypper -n install tar gzip curl || true)
 
-      ###############################################################
-      # Checkout
-      ###############################################################
-      - name: Checkout repo
+      ##########################################################
+      # Checkout repo
+      ##########################################################
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      ###############################################################
-      # Install Dependencies per OS
-      ###############################################################
+      - name: Print environment
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          cat /etc/os-release || true
 
-      # Ubuntu host
-      - name: Install deps (Ubuntu Host)
+      ##########################################################
+      # Install dependencies per distro
+      ##########################################################
+
+      # Ubuntu (host)
+      - name: Install deps (Ubuntu host)
         if: matrix.container == ''
         run: |
           sudo apt update
-          sudo apt install -y curl file tar gzip fuse3 libfuse3-3 || true
+          sudo apt install -y curl fuse3 libfuse3-3 file tar gzip || true
 
-      # Debian & Kali
+      # Debian + Kali FIXED (correct fuse packages)
       - name: Install deps (Debian/Kali)
         if: matrix.os == 'debian' || matrix.os == 'kali'
         run: |
           apt update || true
-          apt install -y curl file tar gzip fuse3 fuse3-libs || true
+          apt install -y curl || true
+          apt install -y fuse3 libfuse3-3 file tar gzip || true
 
-      # Linux Mint
+      # Linux Mint (Debian-based)
       - name: Install deps (Linux Mint)
         if: matrix.os == 'linuxmint'
         run: |
           apt update || true
-          apt install -y curl file tar gzip fuse3 libfuse3-3 || true
+          apt install -y curl fuse3 libfuse3-3 file tar gzip || true
 
-      # RPM family
-      - name: Install deps (RPM distros)
-        if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'oracle' || matrix.os == 'rocky' || matrix.os == 'amazon'
+      # Fedora
+      - name: Install deps (Fedora)
+        if: matrix.os == 'fedora'
         run: |
-          (dnf install -y curl file tar gzip fuse fuse-libs fuse3 fuse3-libs || true)
-          (yum install -y curl file tar gzip fuse fuse-libs fuse3 fuse3-libs || true)
+          dnf -y install curl fuse3 file tar gzip || true
+
+      # Arch Linux
+      - name: Install deps (Arch)
+        if: matrix.os == 'arch'
+        run: |
+          pacman -Sy --noconfirm curl fuse3 file tar gzip || true
+
+      # RHEL/CentOS/Alma/Rocky/Oracle
+      - name: Install deps (RHEL family)
+        if: matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle'
+        run: |
+          yum install -y curl fuse3 file tar gzip || true
+
+      # Amazon Linux
+      - name: Install deps (Amazon Linux)
+        if: matrix.os == 'amazon'
+        run: |
+          yum install -y curl fuse3 file tar gzip || true
 
       # openSUSE
       - name: Install deps (openSUSE)
         if: matrix.os == 'opensuse'
         run: |
           zypper refresh || true
-          zypper install -y curl file tar gzip fuse fuse3 fuse3-libs || true
+          zypper -n install curl fuse3 file tar gzip || true
 
-      # Alpine
+      # Alpine (no FUSE support)
       - name: Install deps (Alpine)
         if: matrix.os == 'alpine'
         run: |
           apk update
-          apk add --no-cache curl file tar gzip fuse fuse3 squashfs-tools gcompat || true
+          apk add --no-cache curl file tar gzip fuse3-libs gcompat || true
 
-      ###############################################################
+      ##########################################################
       # Download AppImage
-      ###############################################################
-      - name: Download AppImage
+      ##########################################################
+      - name: Download nxsbom-cli AppImage
         run: |
           mkdir -p cli_dir
           curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-x86_64.AppImage" \
             -o cli_dir/nxsbom-cli.AppImage
           chmod +x cli_dir/nxsbom-cli.AppImage
-          ls -al cli_dir
 
-      ###############################################################
-      # Run AppImage (native + extract fallback)
-      ###############################################################
-      - name: Run AppImage
+      ##########################################################
+      # Run AppImage (native → fallback extract)
+      ##########################################################
+      - name: Run AppImage on ${{ matrix.os }}
         run: |
           echo ">>> Running AppImage on ${{ matrix.os }}"
           cd cli_dir
 
-          echo "Trying native..."
+          echo "Trying native execution..."
           ./nxsbom-cli.AppImage --help || true
+
+          echo "Trying to mount using FUSE..."
+          ./nxsbom-cli.AppImage --appimage-mount || true
 
           echo "Falling back to extraction..."
           ./nxsbom-cli.AppImage --appimage-extract || true
 
-          if [ -d squashfs-root ]; then
-            echo ">>> Extracted Content:"
-            ls -R squashfs-root || true
+          echo ">>> Extracted files:"
+          ls -R squashfs-root || true
 
-            if [ -f squashfs-root/AppRun ]; then
-              echo ">>> Running extracted AppRun..."
-              squashfs-root/AppRun --help || true
-            fi
+          if [ -f squashfs-root/AppRun ]; then
+            echo ">>> Running extracted AppRun"
+            squashfs-root/AppRun --help || true
+          else
+            echo "❌ AppRun not found"
           fi
 
-      - name: Done
-        run: echo "----- DONE -----"
+          echo "----- DONE -----"
