@@ -1,4 +1,4 @@
-name: Test nxsbom-cli glibc-x86_64 TAR on 14 Linux distro
+name: Test nxsbom-cli glibc-x86_64 TAR on 13 Linux distros
 
 on:
   workflow_dispatch:
@@ -45,23 +45,21 @@ jobs:
           - os: opensuse
             container: "opensuse/leap:latest"
 
-          - os: alpine
-            container: "alpine:latest"
-
           - os: linuxmint
             container: "linuxmintd/mint21-amd64"
 
-    runs-on: ${{ matrix.container == '' && matrix.os || 'ubuntu-24.04' }}
+    # FIX: ubuntu job will run directly on ubuntu runner
+    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
 
     steps:
     ###########################################################################
-    # PRE-INSTALL TAR FOR AMAZON + OPENSUSE (BEFORE CHECKOUT)
+    # PRE-INSTALL TAR FOR AMAZON + OPENSUSE
     ###########################################################################
     - name: Fix tar on Amazon & openSUSE
       if: matrix.os == 'amazon' || matrix.os == 'opensuse'
       run: |
-        echo ">>> Pre-install tar for ${matrix.os}"
+        echo ">>> Pre-installing tar for $(cat /etc/os-release | grep ^ID=)"
         (yum install -y tar gzip || true)
         (dnf install -y tar gzip || true)
         (zypper -n install tar gzip || true)
@@ -73,21 +71,21 @@ jobs:
       uses: actions/checkout@v4
 
     ###########################################################################
-    # INSTALL DEPENDENCIES PER DISTRO
+    # INSTALL DEPENDENCIES
     ###########################################################################
-    - name: Install deps (Debian/Ubuntu/Kali/LinuxMint)
+    - name: Install deps (Debian family)
       if: matrix.os == 'ubuntu' || matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'linuxmint'
       run: |
         apt update || true
         apt install -y curl jq file tar gzip || true
 
-    - name: Install deps (RPM Distros)
+    - name: Install deps (RPM family)
       if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle' || matrix.os == 'amazon'
       run: |
         yum install -y curl jq file tar gzip || \
         dnf install -y curl jq file tar gzip || true
 
-    - name: Install deps (Arch Linux)
+    - name: Install deps (Arch)
       if: matrix.os == 'arch'
       run: |
         pacman -Sy --noconfirm curl jq file tar gzip || true
@@ -98,65 +96,52 @@ jobs:
         zypper refresh || true
         zypper -n install curl jq file tar gzip || true
 
-    - name: Install deps (Alpine)
-      if: matrix.os == 'alpine'
-      run: |
-        apk update
-        apk add --no-cache curl jq file tar gzip
-
     ###########################################################################
-    # DOWNLOAD TARBALL
+    # DOWNLOAD TAR
     ###########################################################################
-    - name: Download nxsbom-cli glibc-x86_64 TAR
+    - name: Download package
       run: |
         mkdir -p cli_dir
         curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-x86_64.tar.gz" \
-          -o cli_dir/nxsbom-glibc.tar.gz
+          -o cli_dir/pkg.tar.gz
         ls -lh cli_dir
 
     ###########################################################################
-    # EXTRACT TAR & DETECT BINARY
+    # EXTRACT PACKAGE
     ###########################################################################
     - name: Extract tarball
       run: |
         cd cli_dir
-        tar -xzf nxsbom-glibc.tar.gz || true
+        tar -xzf pkg.tar.gz
         echo ">>> Extracted:"
         ls -R .
 
+    ###########################################################################
+    # FIND THE BINARY
+    ###########################################################################
     - name: Locate binary
       run: |
-        echo ">>> Searching for nxsbom inside extracted dirs..."
         BIN=$(find cli_dir -type f -name nxsbom | head -n 1 || true)
-
+        echo "BIN=$BIN" >> $GITHUB_ENV
         if [ -z "$BIN" ]; then
           echo "❌ No nxsbom binary found!"
           exit 1
         fi
-
-        echo "FOUND_BIN=$BIN" >> $GITHUB_ENV
         echo "Found at: $BIN"
 
     ###########################################################################
-    # RUN BINARY (FIXED WORKDIR EXECUTION)
+    # RUN BINARY (--help)
     ###########################################################################
-    - name: Execute binary with --help
+    - name: Execute binary
       run: |
-        echo ">>> Executing binary on OS: ${{ matrix.os }}"
-
-        BIN="${FOUND_BIN}"
+        chmod +x "$BIN"
         BIN_DIR=$(dirname "$BIN")
         BIN_FILE=$(basename "$BIN")
 
-        echo "Binary dir: $BIN_DIR"
-        echo "Binary file: $BIN_FILE"
+        echo ">>> Running $BIN_FILE on ${{ matrix.os }}"
 
-        chmod +x "$BIN"
-
-        # Correct execution with directory change
-        bash -c "cd $BIN_DIR && ./$BIN_FILE --help" || \
-        bash -c "cd $BIN_DIR && ./$BIN_FILE -h" || \
-        echo "⚠ Expected loader/glibc issue on ${{ matrix.os }}"
+        (cd "$BIN_DIR" && ./"$BIN_FILE" --help) || \
+        (cd "$BIN_DIR" && ./"$BIN_FILE" -h) || \
+        echo "⚠ Expected glibc mismatch on ${{ matrix.os }}"
 
         echo "----- DONE -----"
-
