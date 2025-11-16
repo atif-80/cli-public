@@ -48,21 +48,22 @@ jobs:
           - os: linuxmint
             container: "linuxmintd/mint21-amd64"
 
-    # FIX: ubuntu job will run directly on ubuntu runner
-    runs-on: ${{ matrix.container == '' && 'ubuntu-24.04' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     container: ${{ matrix.container }}
 
     steps:
     ###########################################################################
-    # PRE-INSTALL TAR FOR AMAZON + OPENSUSE
+    # PRE-INSTALL TAR FOR AMAZON & OPENSUSE (FIXED SYNTAX)
     ###########################################################################
     - name: Fix tar on Amazon & openSUSE
       if: matrix.os == 'amazon' || matrix.os == 'opensuse'
       run: |
-        echo ">>> Pre-installing tar for $(cat /etc/os-release | grep ^ID=)"
-        (yum install -y tar gzip || true)
-        (dnf install -y tar gzip || true)
-        (zypper -n install tar gzip || true)
+        echo ">>> Pre-installing tar for ${{ matrix.os }}"
+        if [ "${{ matrix.os }}" = "amazon" ]; then
+          dnf install -y tar gzip || true
+        elif [ "${{ matrix.os }}" = "opensuse" ]; then
+          zypper -n install tar gzip || true
+        fi
 
     ###########################################################################
     # CHECKOUT
@@ -76,14 +77,13 @@ jobs:
     - name: Install deps (Debian family)
       if: matrix.os == 'ubuntu' || matrix.os == 'debian' || matrix.os == 'kali' || matrix.os == 'linuxmint'
       run: |
-        apt update || true
-        apt install -y curl jq file tar gzip || true
+        apt-get update || true
+        apt-get install -y curl jq file tar gzip || true
 
     - name: Install deps (RPM family)
       if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle' || matrix.os == 'amazon'
       run: |
-        yum install -y curl jq file tar gzip || \
-        dnf install -y curl jq file tar gzip || true
+        (yum install -y curl jq file tar gzip 2>/dev/null || dnf install -y curl jq file tar gzip 2>/dev/null || true)
 
     - name: Install deps (Arch)
       if: matrix.os == 'arch'
@@ -113,21 +113,33 @@ jobs:
       run: |
         cd cli_dir
         tar -xzf pkg.tar.gz
-        echo ">>> Extracted:"
-        ls -R .
+        echo ">>> Extracted contents:"
+        find . -type f -name "nxsbom" | head -5
 
     ###########################################################################
-    # FIND THE BINARY
+    # FIND THE BINARY (SPECIFIC PATH)
     ###########################################################################
     - name: Locate binary
       run: |
-        BIN=$(find cli_dir -type f -name nxsbom | head -n 1 || true)
-        echo "BIN=$BIN" >> $GITHUB_ENV
-        if [ -z "$BIN" ]; then
+        # First try the specific path you mentioned
+        if [ -f "cli_dir/x86-pkg/nxsbom" ]; then
+          BIN="cli_dir/x86-pkg/nxsbom"
+        else
+          # Fallback to search
+          BIN=$(find cli_dir -type f -name nxsbom | head -n 1)
+        fi
+        
+        if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
           echo "❌ No nxsbom binary found!"
+          echo "Directory structure:"
+          find cli_dir -type f | sort
           exit 1
         fi
+        
+        echo "BIN=$BIN" >> $GITHUB_ENV
         echo "Found at: $BIN"
+        file "$BIN" || true
+        ls -la "$BIN" || true
 
     ###########################################################################
     # RUN BINARY (--help)
@@ -140,8 +152,16 @@ jobs:
 
         echo ">>> Running $BIN_FILE on ${{ matrix.os }}"
 
-        (cd "$BIN_DIR" && ./"$BIN_FILE" --help) || \
-        (cd "$BIN_DIR" && ./"$BIN_FILE" -h) || \
-        echo "⚠ Expected glibc mismatch on ${{ matrix.os }}"
+        # Try --help first, then -h as fallback
+        if (cd "$BIN_DIR" && ./"$BIN_FILE" --help); then
+          echo "✅ --help worked successfully on ${{ matrix.os }}"
+        elif (cd "$BIN_DIR" && ./"$BIN_FILE" -h); then
+          echo "✅ -h worked successfully on ${{ matrix.os }}"
+        else
+          echo "⚠ Both --help and -h failed (expected glibc mismatch on some distros)"
+          echo "Binary info:"
+          file "$BIN" || true
+          ldd "$BIN" 2>/dev/null || echo "ldd not available or binary not dynamic"
+        fi
 
-        echo "----- DONE -----"
+        echo "----- DONE ${{ matrix.os }} -----"
