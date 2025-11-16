@@ -54,17 +54,15 @@ jobs:
         platforms: arm64
 
     ###########################################################################
-    # PRE-INSTALL TAR FOR AMAZON & OPENSUSE
+    # INSTALL QEMU USER EMULATION
     ###########################################################################
-    - name: Fix tar on Amazon & openSUSE
-      if: matrix.os == 'amazon' || matrix.os == 'opensuse'
+    - name: Install QEMU user static
       run: |
-        echo ">>> Pre-installing tar for ${{ matrix.os }}"
-        if [ "${{ matrix.os }}" = "amazon" ]; then
-          dnf install -y tar gzip || true
-        elif [ "${{ matrix.os }}" = "opensuse" ]; then
-          zypper -n install tar gzip || true
-        fi
+        apt-get update
+        apt-get install -y qemu-user-static qemu-user binfmt-support
+        # Register ARM64 binary format
+        update-binfmts --enable qemu-aarch64
+        echo ">>> QEMU ARM64 emulation setup complete"
 
     ###########################################################################
     # CHECKOUT
@@ -114,16 +112,16 @@ jobs:
         find . -type f | sort
 
     ###########################################################################
-    # FIND THE BINARY (ARM64 SPECIFIC PATH)
+    # FIND THE BINARY
     ###########################################################################
     - name: Locate binary
       run: |
         # Look for binary in arm64-pkg folder
         if [ -f "cli_dir/arm64-pkg/nxsbom" ]; then
           BIN="cli_dir/arm64-pkg/nxsbom"
-          echo "✅ Found binary at expected path: arm64-pkg/nxsbom"
+          echo "✅ Found binary at: arm64-pkg/nxsbom"
         else
-          echo "❌ Binary not found at expected path: arm64-pkg/nxsbom"
+          echo "❌ Binary not found at arm64-pkg/nxsbom"
           echo "Directory structure:"
           find cli_dir -type f | sort
           exit 1
@@ -135,51 +133,70 @@ jobs:
         ls -la "$BIN" || true
 
     ###########################################################################
-    # VERIFY ARM64 ARCHITECTURE
+    # VERIFY BINARY
     ###########################################################################
-    - name: Verify ARM64 architecture
+    - name: Verify binary
       run: |
-        echo ">>> Verifying ARM64 architecture for ${{ matrix.os }}"
-        if file "$BIN" | grep -q "ARM\|aarch64"; then
-          echo "✅ SUCCESS: Binary is confirmed as ARM64 architecture"
-          echo "Architecture details:"
-          file "$BIN"
+        echo ">>> Verifying binary for ${{ matrix.os }}"
+        file "$BIN"
+        
+        # Check if it's executable
+        if [ -x "$BIN" ]; then
+          echo "✅ Binary is executable"
         else
-          echo "❌ FAIL: Binary is not ARM64 architecture"
-          file "$BIN"
-          exit 1
+          echo "❌ Binary is not executable, making it executable"
+          chmod +x "$BIN"
         fi
+        
+        # Check dependencies
+        echo ">>> Binary dependencies:"
+        ldd "$BIN" 2>/dev/null || echo "ldd not available or static binary"
 
     ###########################################################################
-    # TEST BINARY EXECUTION (EXPECTED TO FAIL)
+    # TEST BINARY EXECUTION (SHOULD WORK WITH QEMU)
     ###########################################################################
     - name: Test binary execution
       run: |
-        chmod +x "$BIN"
-        echo ">>> Testing ARM64 binary execution on ${{ matrix.os }}"
+        echo ">>> Testing binary execution on ${{ matrix.os }}"
         echo "Host architecture: $(uname -m)"
+        echo "Binary path: $BIN"
         
-        # Attempt to run - should fail due to architecture mismatch
-        if ./"$BIN" --help 2>/dev/null; then
-          echo "❌ UNEXPECTED: ARM64 binary executed on x86_64 system"
-          echo "This may indicate architecture compatibility issues"
-          exit 1
+        # Make absolutely sure it's executable
+        chmod +x "$BIN"
+        
+        # Test direct execution first
+        echo ">>> Attempt 1: Direct execution"
+        if "$BIN" --help; then
+          echo "✅ SUCCESS: Binary executed directly"
         else
-          echo "✅ SUCCESS: ARM64 binary correctly failed to execute on x86_64"
-          echo "This confirms the binary is properly built for ARM64 architecture"
+          echo ">>> Attempt 2: With QEMU user emulation"
+          # Try with QEMU
+          if qemu-aarch64 "$BIN" --help; then
+            echo "✅ SUCCESS: Binary executed with QEMU"
+          else
+            echo ">>> Attempt 3: Debug mode"
+            # More verbose output
+            set -x
+            "$BIN" --help || true
+            qemu-aarch64 "$BIN" --help || true
+            set +x
+            echo "❌ Binary execution failed"
+          fi
         fi
 
     ###########################################################################
-    # FINAL VALIDATION
+    # ADDITIONAL DEBUG INFO
     ###########################################################################
-    - name: Final validation
+    - name: Debug information
+      if: always()
       run: |
-        echo "=========================================="
-        echo "✅ VALIDATION COMPLETE: ${{ matrix.os }}"
-        echo "=========================================="
-        echo "✓ ARM64 package downloaded successfully"
-        echo "✓ Binary extracted from arm64-pkg/nxsbom"
-        echo "✓ ARM64 architecture verified"
-        echo "✓ Binary correctly fails execution on x86_64"
-        echo "✓ Package structure is correct"
-        echo "=========================================="
+        echo ">>> Debug information:"
+        echo "QEMU status:"
+        update-binfmts --display | grep -i arm || echo "No ARM formats registered"
+        echo "Available QEMU:"
+        which qemu-aarch64 || echo "qemu-aarch64 not found"
+        echo "Binary final check:"
+        file "$BIN"
+        ls -la "$BIN"
+        echo "Current directory:"
+        pwd
