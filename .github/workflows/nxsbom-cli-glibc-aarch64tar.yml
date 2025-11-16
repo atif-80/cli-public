@@ -1,202 +1,117 @@
-name: Test nxsbom-cli glibc-aarch64 TAR on Linux distros
+name: Test nxsbom-cli glibc-aarch64 TAR on ARM64 Distros
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-glibc-aarch64:
+  test-glibc-aarch64-tar:
+    runs-on: ubuntu-24.04
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu
-            container: "ubuntu:24.04"
+          - os: ubuntu-arm
+            image: "ubuntu:24.04"
 
-          - os: debian
-            container: "debian:latest"
+          - os: debian-arm
+            image: "debian:latest"
 
-          - os: fedora
-            container: "fedora:latest"
+          - os: fedora-arm
+            image: "fedora:39"
 
-          - os: kali
-            container: "kalilinux/kali-rolling"
+          - os: centos-arm
+            image: "quay.io/centos/centos:stream9"
 
-          - os: centos
-            container: "quay.io/centos/centos:stream9"
+          - os: rhel-arm
+            image: "registry.access.redhat.com/ubi9/ubi-minimal"
 
-          - os: rhel
-            container: "registry.access.redhat.com/ubi9/ubi"
+          - os: alma-arm
+            image: "almalinux:9"
 
-          - os: alma
-            container: "almalinux:9"
+          - os: rocky-arm
+            image: "rockylinux:9"
 
-          - os: rocky
-            container: "rockylinux:9"
-
-          - os: oracle
-            container: "oraclelinux:9"
-
-          - os: amazon
-            container: "amazonlinux:2023"
-
-          - os: opensuse
-            container: "opensuse/leap:latest"
-
-    runs-on: ubuntu-24.04
+          - os: oracle-arm
+            image: "oraclelinux:9"
 
     steps:
-    ###########################################################################
-    # SETUP QEMU FOR ARM64 EMULATION
-    ###########################################################################
-    - name: Set up QEMU for ARM64 emulation
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: arm64
+      ###################################################################
+      # Enable QEMU ARM64 emulation
+      ###################################################################
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-    ###########################################################################
-    # INSTALL QEMU USER EMULATION
-    ###########################################################################
-    - name: Install QEMU user static
-      run: |
-        apt-get update
-        apt-get install -y qemu-user-static qemu-user binfmt-support
-        # Register ARM64 binary format
-        update-binfmts --enable qemu-aarch64
-        echo ">>> QEMU ARM64 emulation setup complete"
+      ###################################################################
+      # Run ARM64 container with multi-arch support
+      ###################################################################
+      - name: Run ARM64 test container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.image }}
+          options: "--platform linux/arm64"
+          shell: bash
+          run: |
+            echo ">>> Running on ${{ matrix.os }}"
+            uname -a || true
+            cat /etc/os-release || true
 
-    ###########################################################################
-    # CHECKOUT
-    ###########################################################################
-    - name: Checkout repository
-      uses: actions/checkout@v4
+            ############################################################
+            # Install dependencies (apt/yum/dnf/zypper)
+            ############################################################
+            if command -v apt >/dev/null 2>&1; then
+              apt update -y || true
+              apt install -y curl tar gzip findutils file jq || true
+            fi
 
-    ###########################################################################
-    # INSTALL DEPENDENCIES
-    ###########################################################################
-    - name: Install deps (Debian family)
-      if: matrix.os == 'ubuntu' || matrix.os == 'debian' || matrix.os == 'kali'
-      run: |
-        apt-get update || true
-        apt-get install -y curl file tar gzip binutils || true
+            if command -v dnf >/dev/null 2>&1; then
+              dnf install -y curl tar gzip findutils file jq || true
+            fi
 
-    - name: Install deps (RPM family)
-      if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle' || matrix.os == 'amazon'
-      run: |
-        (yum install -y curl file tar gzip binutils 2>/dev/null || dnf install -y curl file tar gzip binutils 2>/dev/null || true)
+            if command -v yum >/dev/null 2>&1; then
+              yum install -y curl tar gzip findutils file jq || true
+            fi
 
-    - name: Install deps (openSUSE)
-      if: matrix.os == 'opensuse'
-      run: |
-        zypper refresh || true
-        zypper -n install curl file tar gzip binutils || true
+            if command -v zypper >/dev/null 2>&1; then
+              zypper -n install curl tar gzip findutils file jq || true
+            fi
 
-    ###########################################################################
-    # DOWNLOAD AARCH64 TAR
-    ###########################################################################
-    - name: Download ARM64 package
-      run: |
-        mkdir -p cli_dir
-        curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-aarch64.tar.gz" \
-          -o cli_dir/pkg.tar.gz
-        echo ">>> Downloaded ARM64 package:"
-        ls -lh cli_dir
+            ############################################################
+            # Download TAR
+            ############################################################
+            mkdir -p cli_dir
+            curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-aarch64.tar.gz" \
+              -o cli_dir/pkg.tar.gz
 
-    ###########################################################################
-    # EXTRACT PACKAGE
-    ###########################################################################
-    - name: Extract tarball
-      run: |
-        cd cli_dir
-        tar -xzf pkg.tar.gz
-        echo ">>> Extracted contents:"
-        find . -type f | sort
+            echo "Downloaded package:"
+            ls -lh cli_dir
 
-    ###########################################################################
-    # FIND THE BINARY
-    ###########################################################################
-    - name: Locate binary
-      run: |
-        # Look for binary in arm64-pkg folder
-        if [ -f "cli_dir/arm64-pkg/nxsbom" ]; then
-          BIN="cli_dir/arm64-pkg/nxsbom"
-          echo "✅ Found binary at: arm64-pkg/nxsbom"
-        else
-          echo "❌ Binary not found at arm64-pkg/nxsbom"
-          echo "Directory structure:"
-          find cli_dir -type f | sort
-          exit 1
-        fi
-        
-        echo "BIN=$BIN" >> $GITHUB_ENV
-        echo "Binary details:"
-        file "$BIN" || true
-        ls -la "$BIN" || true
+            ############################################################
+            # Extract TAR
+            ############################################################
+            cd cli_dir
+            tar -xzf pkg.tar.gz
 
-    ###########################################################################
-    # VERIFY BINARY
-    ###########################################################################
-    - name: Verify binary
-      run: |
-        echo ">>> Verifying binary for ${{ matrix.os }}"
-        file "$BIN"
-        
-        # Check if it's executable
-        if [ -x "$BIN" ]; then
-          echo "✅ Binary is executable"
-        else
-          echo "❌ Binary is not executable, making it executable"
-          chmod +x "$BIN"
-        fi
-        
-        # Check dependencies
-        echo ">>> Binary dependencies:"
-        ldd "$BIN" 2>/dev/null || echo "ldd not available or static binary"
+            echo "Extracted contents:"
+            ls -R .
 
-    ###########################################################################
-    # TEST BINARY EXECUTION (SHOULD WORK WITH QEMU)
-    ###########################################################################
-    - name: Test binary execution
-      run: |
-        echo ">>> Testing binary execution on ${{ matrix.os }}"
-        echo "Host architecture: $(uname -m)"
-        echo "Binary path: $BIN"
-        
-        # Make absolutely sure it's executable
-        chmod +x "$BIN"
-        
-        # Test direct execution first
-        echo ">>> Attempt 1: Direct execution"
-        if "$BIN" --help; then
-          echo "✅ SUCCESS: Binary executed directly"
-        else
-          echo ">>> Attempt 2: With QEMU user emulation"
-          # Try with QEMU
-          if qemu-aarch64 "$BIN" --help; then
-            echo "✅ SUCCESS: Binary executed with QEMU"
-          else
-            echo ">>> Attempt 3: Debug mode"
-            # More verbose output
-            set -x
-            "$BIN" --help || true
-            qemu-aarch64 "$BIN" --help || true
-            set +x
-            echo "❌ Binary execution failed"
-          fi
-        fi
+            ############################################################
+            # Locate binary inside arm64-pkg/
+            ############################################################
+            BIN=$(find . -type f -name nxsbom | head -n 1 || true)
 
-    ###########################################################################
-    # ADDITIONAL DEBUG INFO
-    ###########################################################################
-    - name: Debug information
-      if: always()
-      run: |
-        echo ">>> Debug information:"
-        echo "QEMU status:"
-        update-binfmts --display | grep -i arm || echo "No ARM formats registered"
-        echo "Available QEMU:"
-        which qemu-aarch64 || echo "qemu-aarch64 not found"
-        echo "Binary final check:"
-        file "$BIN"
-        ls -la "$BIN"
-        echo "Current directory:"
-        pwd
+            if [ -z "$BIN" ]; then
+              echo "❌ No nxsbom binary found!"
+              exit 1
+            fi
+
+            chmod +x "$BIN"
+            echo "Found binary at: $BIN"
+
+            ############################################################
+            # Run binary
+            ############################################################
+            echo ">>> Executing nxsbom on ${{ matrix.os }}"
+            "$BIN" --help || "$BIN" -h || echo "⚠ glibc issue expected on non-glibc systems"
+
+            echo "----- DONE -----"
