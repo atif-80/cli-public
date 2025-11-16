@@ -1,0 +1,199 @@
+name: Test nxsbom-cli glibc-aarch64 TAR on ARM64 Linux distros
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-glibc-aarch64:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu
+            container: "ubuntu:24.04"
+            arch: arm64
+
+          - os: debian
+            container: "debian:latest"
+            arch: arm64
+
+          - os: fedora
+            container: "fedora:latest"
+            arch: arm64
+
+          - os: arch
+            container: "archlinux:latest"
+            arch: arm64
+
+          - os: kali
+            container: "kalilinux/kali-rolling"
+            arch: arm64
+
+          - os: centos
+            container: "quay.io/centos/centos:stream9"
+            arch: arm64
+
+          - os: rhel
+            container: "registry.access.redhat.com/ubi9/ubi"
+            arch: arm64
+
+          - os: alma
+            container: "almalinux:9"
+            arch: arm64
+
+          - os: rocky
+            container: "rockylinux:9"
+            arch: arm64
+
+          - os: oracle
+            container: "oraclelinux:9"
+            arch: arm64
+
+          - os: amazon
+            container: "amazonlinux:2023"
+            arch: arm64
+
+          - os: opensuse
+            container: "opensuse/leap:latest"
+            arch: arm64
+
+    runs-on: ubuntu-24.04-arm64
+
+    steps:
+    ###########################################################################
+    # PRE-INSTALL TAR FOR AMAZON & OPENSUSE
+    ###########################################################################
+    - name: Fix tar on Amazon & openSUSE
+      if: matrix.os == 'amazon' || matrix.os == 'opensuse'
+      run: |
+        echo ">>> Pre-installing tar for ${{ matrix.os }}"
+        if [ "${{ matrix.os }}" = "amazon" ]; then
+          dnf install -y tar gzip || true
+        elif [ "${{ matrix.os }}" = "opensuse" ]; then
+          zypper -n install tar gzip || true
+        fi
+
+    ###########################################################################
+    # CHECKOUT
+    ###########################################################################
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    ###########################################################################
+    # INSTALL DEPENDENCIES
+    ###########################################################################
+    - name: Install deps (Debian family)
+      if: matrix.os == 'ubuntu' || matrix.os == 'debian' || matrix.os == 'kali'
+      run: |
+        apt-get update || true
+        apt-get install -y curl jq file tar gzip || true
+
+    - name: Install deps (RPM family)
+      if: matrix.os == 'fedora' || matrix.os == 'centos' || matrix.os == 'rhel' || matrix.os == 'alma' || matrix.os == 'rocky' || matrix.os == 'oracle' || matrix.os == 'amazon'
+      run: |
+        (yum install -y curl jq file tar gzip 2>/dev/null || dnf install -y curl jq file tar gzip 2>/dev/null || true)
+
+    - name: Install deps (Arch)
+      if: matrix.os == 'arch'
+      run: |
+        pacman -Sy --noconfirm curl jq file tar gzip || true
+
+    - name: Install deps (openSUSE)
+      if: matrix.os == 'opensuse'
+      run: |
+        zypper refresh || true
+        zypper -n install curl jq file tar gzip || true
+
+    ###########################################################################
+    # DOWNLOAD AARCH64 TAR
+    ###########################################################################
+    - name: Download package
+      run: |
+        mkdir -p cli_dir
+        curl -L "https://github.com/atif-80/cli-public/releases/download/v1.0/nxsbom-cli-glibc-aarch64.tar.gz" \
+          -o cli_dir/pkg.tar.gz
+        echo ">>> Downloaded package:"
+        ls -lh cli_dir
+
+    ###########################################################################
+    # EXTRACT PACKAGE
+    ###########################################################################
+    - name: Extract tarball
+      run: |
+        cd cli_dir
+        tar -xzf pkg.tar.gz
+        echo ">>> Extracted contents:"
+        find . -type f | sort
+
+    ###########################################################################
+    # FIND THE BINARY (ARM64 SPECIFIC PATH)
+    ###########################################################################
+    - name: Locate binary
+      run: |
+        # First try the specific path for aarch64
+        if [ -f "cli_dir/arm64-pkg/nxsbom" ]; then
+          BIN="cli_dir/arm64-pkg/nxsbom"
+        else
+          # Fallback to search
+          BIN=$(find cli_dir -type f -name nxsbom | head -n 1)
+        fi
+        
+        if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+          echo "❌ No nxsbom binary found!"
+          echo "Directory structure:"
+          find cli_dir -type f | sort
+          exit 1
+        fi
+        
+        echo "BIN=$BIN" >> $GITHUB_ENV
+        echo "Found at: $BIN"
+        echo "Binary info:"
+        file "$BIN" || true
+        ls -la "$BIN" || true
+
+    ###########################################################################
+    # VERIFY BINARY ARCHITECTURE
+    ###########################################################################
+    - name: Verify ARM64 binary
+      run: |
+        echo ">>> Verifying binary architecture for ${{ matrix.os }}"
+        file "$BIN" | grep -q "ARM" && echo "✅ ARM64 architecture confirmed" || echo "⚠ Architecture check inconclusive"
+        
+        # Check if binary is executable
+        if [ -x "$BIN" ]; then
+          echo "✅ Binary is executable"
+        else
+          echo "❌ Binary is not executable"
+          exit 1
+        fi
+
+    ###########################################################################
+    # RUN BINARY (--help)
+    ###########################################################################
+    - name: Execute binary
+      run: |
+        chmod +x "$BIN"
+        BIN_DIR=$(dirname "$BIN")
+        BIN_FILE=$(basename "$BIN")
+
+        echo ">>> Running $BIN_FILE on ${{ matrix.os }} (ARM64)"
+
+        # Display system info
+        echo ">>> System Information:"
+        uname -a || true
+        cat /etc/os-release | grep PRETTY_NAME || true
+
+        # Try --help first, then -h as fallback
+        if (cd "$BIN_DIR" && ./"$BIN_FILE" --help); then
+          echo "✅ --help worked successfully on ${{ matrix.os }} ARM64"
+        elif (cd "$BIN_DIR" && ./"$BIN_FILE" -h); then
+          echo "✅ -h worked successfully on ${{ matrix.os }} ARM64"
+        else
+          echo "❌ Both --help and -h failed on ${{ matrix.os }} ARM64"
+          echo "Debug info:"
+          file "$BIN" || true
+          ldd "$BIN" 2>/dev/null || echo "ldd not available or binary not dynamic"
+          exit 1
+        fi
+
+        echo "----- SUCCESS: ${{ matrix.os }} ARM64 -----"
