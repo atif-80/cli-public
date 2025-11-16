@@ -1,4 +1,4 @@
-name: Test nxsbom-cli glibc-x86_64 TAR on 14 Linux distros
+name: Test nxsbom-cli glibc-x86_64 TAR on 14 Linux distro
 
 on:
   workflow_dispatch:
