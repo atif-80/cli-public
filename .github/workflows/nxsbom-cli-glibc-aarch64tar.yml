@@ -24,7 +24,7 @@ jobs:
             image: "quay.io/centos/centos:stream9"
 
           - os: rhel-arm
-            image: "registry.access.redhat.com/ubi9/ubi-minimal"
+            image: "registry.access.redhat.com/ubi9/ubi"  # CHANGED: from ubi-minimal to ubi
 
           - os: alma-arm
             image: "almalinux:9"
